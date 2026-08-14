@@ -129,13 +129,22 @@ $iisFeatures = @(
     "IIS-RequestFiltering",
     "IIS-ManagementConsole"
 )
+$missingIisFeatures = @()
 foreach ($feature in $iisFeatures) {
     $state = Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction Stop
     if ($state.State -ne "Enabled") {
-        $result = Enable-WindowsOptionalFeature -Online -FeatureName $feature -All -NoRestart -ErrorAction Stop
-        if ($result.RestartNeeded) {
-            throw "IIS feature $feature yeu cau restart. Hay restart Windows va chay lai script."
-        }
+        $missingIisFeatures += $feature
+    }
+}
+if ($missingIisFeatures.Count -gt 0) {
+    $result = Enable-WindowsOptionalFeature `
+        -Online `
+        -FeatureName $missingIisFeatures `
+        -All `
+        -NoRestart `
+        -ErrorAction Stop
+    if ($result.RestartNeeded) {
+        throw "Da bat toan bo IIS features con thieu, nhung Windows yeu cau restart. Hay restart Windows va chay lai script."
     }
 }
 
