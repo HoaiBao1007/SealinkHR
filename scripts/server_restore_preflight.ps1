@@ -58,10 +58,15 @@ $principal = [Security.Principal.WindowsPrincipal]::new(
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 Write-Check "Administrator" $isAdmin "PowerShell phai chay bang Run as administrator"
 
-$drive = Get-PSDrive -Name D -PSProvider FileSystem -ErrorAction SilentlyContinue
+$appFullPath = [System.IO.Path]::GetFullPath($AppPath)
+$appDriveRoot = [System.IO.Path]::GetPathRoot($appFullPath)
+$appDriveName = $appDriveRoot.TrimEnd("\").TrimEnd(":")
+$drive = Get-PSDrive -Name $appDriveName -PSProvider FileSystem -ErrorAction SilentlyContinue
 $driveOk = $null -ne $drive -and $drive.Free -ge 1GB
-$driveDetail = if ($drive) { "Free=$([Math]::Round($drive.Free / 1GB, 2)) GB" } else { "Khong co o D:" }
-Write-Check "D drive" $driveOk $driveDetail
+$driveDetail = if ($drive) {
+    "Root=$appDriveRoot; Free=$([Math]::Round($drive.Free / 1GB, 2)) GB"
+} else { "Khong tim thay o dia cua AppPath: $appDriveRoot" }
+Write-Check "Application drive" $driveOk $driveDetail
 
 $packages = @(
     [pscustomobject]@{
