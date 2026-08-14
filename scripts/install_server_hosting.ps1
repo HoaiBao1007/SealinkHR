@@ -78,13 +78,6 @@ if ($backendEnvItem.LinkType -ne "HardLink") {
     throw "Backend .env khong phai hard-link den secrets file."
 }
 
-foreach ($port in @($BackendPort, $FrontendPort)) {
-    $listener = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($listener) {
-        throw "Port $port dang duoc PID $($listener.OwningProcess) su dung. Hay dung test server truoc."
-    }
-}
-
 Write-Step "Cap nhat CORS production cho hostname va IP server"
 $ipv4Addresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object {
@@ -181,6 +174,11 @@ if ($site) {
         throw "IIS site $SiteName da ton tai nhung khong co binding $expectedBinding"
     }
 } else {
+    $frontendListener = Get-NetTCPConnection -State Listen -LocalPort $FrontendPort -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($frontendListener) {
+        throw "Port frontend $FrontendPort dang duoc PID $($frontendListener.OwningProcess) su dung, nhung IIS site $SiteName chua ton tai."
+    }
     New-Website `
         -Name $SiteName `
         -Port $FrontendPort `
@@ -198,10 +196,25 @@ if ((Get-Website -Name $SiteName).State -ne "Started") {
 Write-Step "Dang ky backend Windows Scheduled Task"
 if (Get-ScheduledTask -TaskName $BackendTaskName -ErrorAction SilentlyContinue) {
     Stop-ScheduledTask -TaskName $BackendTaskName -ErrorAction SilentlyContinue
+    for ($attempt = 1; $attempt -le 15; $attempt++) {
+        if (-not (Get-NetTCPConnection -State Listen -LocalPort $BackendPort -ErrorAction SilentlyContinue)) {
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+}
+$backendListener = Get-NetTCPConnection -State Listen -LocalPort $BackendPort -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($backendListener) {
+    throw "Port backend $BackendPort dang duoc PID $($backendListener.OwningProcess) su dung. Hay dung tien trinh backend khac truoc."
 }
 $taskArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runnerScript`" -AppPath `"$AppPath`" -LogDirectory `"$LogDirectory`" -BackendPort $BackendPort"
+$windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
+    throw "Khong tim thay Windows PowerShell: $windowsPowerShell"
+}
 $action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
+    -Execute $windowsPowerShell `
     -Argument $taskArguments `
     -WorkingDirectory $backendPath
 $trigger = New-ScheduledTaskTrigger -AtStartup
@@ -253,10 +266,15 @@ $frontendUrl = "http://127.0.0.1:$FrontendPort/"
 if (-not (Wait-ForHttp -Uri $healthUrl -ExpectHealth)) {
     $taskInfo = Get-ScheduledTaskInfo -TaskName $BackendTaskName
     $stderrLog = Join-Path $LogDirectory "backend-service.stderr.log"
-    $errorText = if (Test-Path -LiteralPath $stderrLog) {
-        Get-Content -LiteralPath $stderrLog -Tail 80 -ErrorAction SilentlyContinue | Out-String
-    } else { "" }
-    throw "Backend khong san sang. LastTaskResult=$($taskInfo.LastTaskResult). Log: $errorText"
+    $bootstrapLog = Join-Path $LogDirectory "backend-service.bootstrap.log"
+    $logParts = @()
+    foreach ($logPath in @($bootstrapLog, $stderrLog)) {
+        if (Test-Path -LiteralPath $logPath) {
+            $logParts += "--- $logPath ---"
+            $logParts += (Get-Content -LiteralPath $logPath -Tail 80 -ErrorAction SilentlyContinue | Out-String)
+        }
+    }
+    throw "Backend khong san sang. LastTaskResult=$($taskInfo.LastTaskResult).`n$($logParts -join [Environment]::NewLine)"
 }
 if (-not (Wait-ForHttp -Uri $frontendUrl)) {
     throw "IIS frontend khong san sang: $frontendUrl"
