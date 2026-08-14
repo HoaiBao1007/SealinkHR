@@ -114,21 +114,9 @@ try {
         -Arguments @("-m", "alembic", "upgrade", "head") `
         -Description "Alembic upgrade"
 
-    $databaseVerificationCode = @"
-from sqlalchemy import text
-from app.db.session import engine
-with engine.connect() as connection:
-    employees = connection.execute(text("SELECT COUNT(*) FROM employees")).scalar_one()
-    attendance = connection.execute(text("SELECT COUNT(*) FROM attendance_daily")).scalar_one()
-    timesheets = connection.execute(text("SELECT COUNT(*) FROM timesheets")).scalar_one()
-    revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-print(f"DB_VERIFY|employees={employees}|attendance_daily={attendance}|timesheets={timesheets}|revision={revision}")
-if (employees, attendance, timesheets) != (59, 1857, 121):
-    raise SystemExit(2)
-"@
     Write-Step "Doi soat database bang tai khoan ung dung trong .env"
     Invoke-Checked -Executable $venvPython `
-        -Arguments @("-c", $databaseVerificationCode) `
+        -Arguments @("-m", "app.db.verify_runtime") `
         -Description "Doi soat database"
 } finally {
     Pop-Location
