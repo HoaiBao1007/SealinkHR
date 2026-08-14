@@ -12,8 +12,12 @@ from app.db.base import Base
 
 config = context.config
 
-# Override sqlalchemy.url from settings (reads from .env) instead of alembic.ini
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Override sqlalchemy.url from settings (reads from .env) instead of alembic.ini.
+# ConfigParser treats percent signs as interpolation markers. URL-encoded
+# credentials legitimately contain values such as "%40", so percent signs must
+# be doubled while storing the URL in Alembic's in-memory config. Reading the
+# option later converts them back to the original single percent signs.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 fileConfig(config.config_file_name)
 target_metadata = Base.metadata
