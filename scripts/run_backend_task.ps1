@@ -42,8 +42,16 @@ try {
     Add-Content -LiteralPath $stdoutLog -Value "[$(Get-Date -Format o)] Starting SEALINK backend on port $BackendPort"
     Push-Location $backendPath
     $locationPushed = $true
-    & $python -m uvicorn app.main:app --host 0.0.0.0 --port $BackendPort 1>> $stdoutLog 2>> $stderrLog
-    $exitCode = $LASTEXITCODE
+    # Windows PowerShell 5.1 turns native stderr (including harmless Python
+    # warnings) into error records. Do not let those records terminate the task.
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $python -m uvicorn app.main:app --host 0.0.0.0 --port $BackendPort 1>> $stdoutLog 2>> $stderrLog
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
     Write-BootstrapLog "Uvicorn exited with code $exitCode"
 } catch {
     $details = "Runner failed: $($_.Exception.Message)"
