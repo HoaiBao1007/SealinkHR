@@ -1,0 +1,4513 @@
+body,
+button,
+input,
+select,
+textarea,
+table,
+th,
+td,
+aside,
+nav,
+.sidebar-container,
+* {
+  font-family: Roboto, Arial, sans-serif !important;
+}
+
+.panel {
+  display: grid;
+  gap: 24px;
+}
+
+.grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 24px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+}
+
+.card h2 {
+  margin: 0 0 18px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.card h3 {
+  color: var(--ink-soft);
+}
+
+.panel p,
+.modal-card p {
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+.panel label,
+.modal-card label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #475569;
+  margin: 0;
+}
+
+.panel label+label,
+.modal-card label+label {
+  margin-top: 14px;
+}
+
+.panel input,
+.panel select,
+.modal-card input,
+.modal-card select {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 12px 14px;
+  color: var(--ink);
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.panel button,
+.modal-card button {
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 8px 14px;
+  color: var(--ink);
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.panel input:focus,
+.panel select:focus,
+.modal-card input:focus,
+.modal-card select:focus {
+  outline: none;
+  border-color: #2b5f94;
+  box-shadow: 0 0 0 4px rgba(43, 95, 148, 0.12);
+}
+
+.panel button,
+.modal-card button {
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(180deg, #1d4c7f 0%, #153a61 100%);
+  border: none;
+  box-shadow: 0 16px 30px -24px rgba(21, 58, 97, 0.95);
+}
+
+.panel button:hover:not(:disabled),
+.modal-card button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.panel button:disabled,
+.modal-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  transform: none;
+}
+
+.panel button.ghost,
+.modal-card button.ghost {
+  background: #fff;
+  color: var(--brand);
+  border: 1px solid #cbd5e1;
+  box-shadow: none;
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+}
+
+.drop-zone {
+  border: 1.5px dashed #94a3b8;
+  border-radius: 20px;
+  padding: 18px;
+  margin-top: 8px;
+  background: #f8fafc;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.drop-zone strong {
+  font-size: 15px;
+  color: var(--brand);
+}
+
+.drop-zone span {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.drop-zone.is-dragging {
+  border-color: #2b5f94;
+  background: #eef5fb;
+  transform: translateY(-1px);
+}
+
+.import-inspect-box {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 18px;
+  background: var(--surface-muted);
+}
+
+.custom-import-config {
+  display: grid;
+  gap: 16px;
+}
+
+.mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.import-action-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.import-layout {
+  display: grid;
+  gap: 24px;
+}
+
+.import-workspace {
+  display: grid;
+  gap: 16px;
+}
+
+.import-intro {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 12px !important;
+}
+
+.import-commit-box {
+  border: 1px solid #dbeafe;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+  padding: 16px;
+}
+
+.import-commit-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand);
+}
+
+.import-commit-box-inline {
+  display: grid;
+  gap: 14px;
+}
+
+.import-commit-inline-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(220px, 320px);
+  gap: 12px;
+  align-items: end;
+}
+
+.import-commit-field {
+  margin: 0;
+}
+
+.import-commit-inline-row button {
+  margin-top: 0;
+}
+
+.import-commit-box p {
+  margin-bottom: 0;
+}
+
+.import-preview-box {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.import-preview-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.import-preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  text-align: right;
+}
+
+.import-preview-toggle {
+  width: auto !important;
+  margin-top: 0 !important;
+  white-space: nowrap;
+}
+
+.timesheet-query-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.timesheet-query-summary {
+  min-width: 0;
+}
+
+.panel .timesheet-query-summary h2 {
+  margin: 0 !important;
+}
+
+.panel .timesheet-query-summary p {
+  margin: 4px 0 0 !important;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.panel button.timesheet-upload-toggle {
+  width: auto !important;
+  min-width: 132px;
+  margin: 0 !important;
+  padding: 10px 14px !important;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .timesheet-query-header {
+    grid-template-columns: 1fr;
+  }
+
+  .panel button.timesheet-upload-toggle {
+    width: 100% !important;
+  }
+}
+
+.import-preview-heading h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.import-loading-banner {
+  margin: 0;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #f4f9ff;
+  color: var(--brand);
+  font-size: 13px;
+}
+
+.import-filter-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.import-filter-search {
+  margin: 0;
+}
+
+.import-column-filter-box {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  background: #fbfcfe;
+}
+
+.import-column-filter-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.import-column-filter-header p {
+  margin: 0;
+}
+
+.import-filter-reset {
+  width: auto;
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.import-column-select-field {
+  display: grid;
+  width: min(100%, 360px);
+  gap: 6px;
+  margin-top: 12px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.import-column-select-field select,
+.import-column-filter-field select {
+  width: 100%;
+  margin-top: 0;
+  color: #1e293b;
+  background: #fff;
+}
+
+.import-column-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.import-column-chip {
+  width: auto;
+  margin-top: 0;
+  border: 1px solid #dbe5f0;
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: #f8fafc;
+  color: var(--brand);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.import-column-chip.is-active {
+  background: linear-gradient(180deg, #1d4c7f 0%, #153a61 100%);
+  border-color: transparent;
+  color: #fff;
+}
+
+.import-column-criteria-box {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  background: #ffffff;
+}
+
+.import-column-criteria-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.import-column-filter-field {
+  margin: 0;
+}
+
+.import-column-criteria-note {
+  margin: 12px 0 0;
+}
+
+.employee-preview-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.employee-preview-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 12px;
+  align-items: end;
+}
+
+.employee-preview-search,
+.employee-preview-page-size {
+  margin: 0;
+}
+
+.employee-preview-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.employee-preview-list {
+  display: grid;
+  gap: 14px;
+}
+
+.employee-preview-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  background: linear-gradient(180deg, #ffffff, #f9fcff);
+}
+
+.employee-preview-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.employee-preview-card-head h4 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  color: #173b4b;
+}
+
+.employee-preview-card-head p {
+  margin: 0;
+}
+
+.employee-preview-badge {
+  border: 1px solid #b9d8e6;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #f1fbff;
+  color: #0a6f9d;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.employee-preview-day-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.employee-preview-day-card {
+  border: 1px solid #d7e8f2;
+  border-radius: 12px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.employee-preview-day-card strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #0a6f9d;
+}
+
+.employee-preview-time-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.employee-preview-time-list span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: #eef7fd;
+  color: #214255;
+  font-size: 12px;
+}
+
+.employee-preview-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.employee-preview-actions button {
+  width: auto;
+  min-width: 200px;
+}
+
+.employee-preview-empty {
+  border: 1px dashed #b9d8e6;
+  border-radius: 12px;
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+  background: #fbfdff;
+}
+
+.preview-data-table th,
+.preview-data-table td {
+  white-space: pre-wrap;
+}
+
+.import-table-wrap {
+  max-height: min(68vh, 820px);
+}
+
+.preview-data-table {
+  min-width: 960px;
+}
+
+.preview-data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: #f9fafb;
+  /* bg-gray-50 */
+  padding: 0.625rem 1rem;
+  /* py-2.5 px-4 */
+}
+
+.preview-data-table .is-sticky-first,
+.preview-data-table .is-sticky-second {
+  position: sticky;
+  background: #ffffff;
+  box-shadow: 1px 0 0 var(--line);
+}
+
+.preview-data-table thead .is-sticky-first,
+.preview-data-table thead .is-sticky-second {
+  z-index: 6;
+  background: #f9fafb;
+  /* match above */
+}
+
+.preview-data-table .is-sticky-first {
+  left: 0;
+  min-width: 160px;
+  max-width: 160px;
+  width: 160px;
+  word-wrap: break-word;
+}
+
+.preview-data-table .is-sticky-second {
+  left: 160px;
+  min-width: 220px;
+  max-width: 220px;
+  width: 220px;
+  word-wrap: break-word;
+}
+
+.preview-data-table tbody tr:nth-child(even) td:not(.is-sticky-first):not(.is-sticky-second) {
+  background: #fbfcfe;
+}
+
+.validation-table {
+  margin-top: 14px;
+}
+
+.json-result-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.employee-json-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fcfeff;
+}
+
+.employee-json-card summary {
+  cursor: pointer;
+  padding: 14px 16px;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.employee-json-summary-flag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid #c8def7;
+  background: #eaf4ff;
+  color: #1d4f80;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.employee-json-insight {
+  padding: 0 16px 14px;
+  border-top: 1px solid #e5eef7;
+  background: #f8fbff;
+}
+
+.employee-json-insight-title {
+  margin: 14px 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #274256;
+}
+
+.employee-json-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.employee-json-chip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #d7e4f2;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #365266;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.employee-json-chip strong {
+  color: #173b4b;
+}
+
+.json-preview {
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  background: #0d1b24;
+  color: #e6f3ff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.panel table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 640px;
+}
+
+.timesheet-grid-table {
+  min-width: 1400px;
+}
+
+.timesheet-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+
+.timesheet-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #274256;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.timesheet-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.timesheet-legend-item.symbol-work .timesheet-legend-chip {
+  background: #e2f0d9;
+  color: #2f5d2f;
+}
+
+.timesheet-legend-item.symbol-paid-leave .timesheet-legend-chip {
+  background: #fff2cc;
+  color: #7b5b00;
+}
+
+.timesheet-legend-item.symbol-absent .timesheet-legend-chip {
+  background: #fbe4e6;
+  color: #8b2331;
+}
+
+.timesheet-legend-item.symbol-business-trip .timesheet-legend-chip {
+  background: #ddebf7;
+  color: #1d4f80;
+}
+
+.timesheet-legend-item.symbol-half-work-leave .timesheet-legend-chip {
+  background: linear-gradient(180deg, #e2f0d9 0%, #e2f0d9 50%, #fff2cc 50%, #fff2cc 100%);
+  color: #35573a;
+}
+
+.timesheet-legend-item.symbol-half-leave-work .timesheet-legend-chip {
+  background: linear-gradient(180deg, #fff2cc 0%, #fff2cc 50%, #e2f0d9 50%, #e2f0d9 100%);
+  color: #35573a;
+}
+
+.timesheet-legend-item.symbol-half-leave-absent .timesheet-legend-chip {
+  background: linear-gradient(180deg, #fff2cc 0%, #fff2cc 50%, #fbe4e6 50%, #fbe4e6 100%);
+  color: #744033;
+}
+
+.timesheet-legend-item.symbol-half-absent-leave .timesheet-legend-chip {
+  background: linear-gradient(180deg, #fbe4e6 0%, #fbe4e6 50%, #fff2cc 50%, #fff2cc 100%);
+  color: #744033;
+}
+
+.timesheet-grid-table th,
+.timesheet-grid-table td {
+  text-align: center;
+  vertical-align: middle;
+  padding: 8px 6px;
+}
+
+.timesheet-grid-table .sticky-col {
+  position: sticky;
+  z-index: 3;
+  background: #ffffff;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+  /* shadow-[2px_0_5px_rgba(0,0,0,0.05)] */
+}
+
+.timesheet-grid-table thead .sticky-col {
+  z-index: 6;
+}
+
+.timesheet-grid-table .sticky-index {
+  left: 0;
+  min-width: 60px;
+  max-width: 60px;
+  width: 60px;
+  word-wrap: break-word;
+}
+
+.timesheet-grid-table .sticky-name {
+  left: 60px;
+  min-width: 240px;
+  max-width: 240px;
+  width: 240px;
+  text-align: left;
+  word-wrap: break-word;
+}
+
+.timesheet-grid-table .sticky-flag {
+  left: 300px;
+  min-width: 110px;
+  max-width: 110px;
+  width: 110px;
+  word-wrap: break-word;
+}
+
+.timesheet-grid-table .timesheet-day-header,
+.timesheet-grid-table .timesheet-weekday-header {
+  min-width: 44px;
+  width: 44px;
+}
+
+.timesheet-grid-table .timesheet-day-header {
+  background: #cbd5e1;
+  color: #1e3a8a;
+  font-weight: 700;
+  border-bottom: 1px solid #cbd5e1; /* Changed to match outer border */
+}
+
+.timesheet-grid-table .timesheet-weekday-header {
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid #94a3b8; /* Changed to match inner border */
+}
+
+.timesheet-grid-table .timesheet-day-header.is-weekend,
+.timesheet-grid-table .timesheet-weekday-header.is-weekend {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.timesheet-grid-table .timesheet-summary-header {
+  min-width: 116px;
+  width: 116px;
+  background: #c6e0b4;
+  color: #31521d;
+}
+
+.timesheet-grid-table .timesheet-summary-cell {
+  min-width: 116px;
+  background: #eef7e7;
+}
+
+.timesheet-grid-table .timesheet-day-cell {
+  font-weight: 700;
+  color: #274256;
+}
+
+.timesheet-grid-table .timesheet-day-cell.is-weekend {
+  background: #e2f0d9;
+}
+
+.timesheet-grid-table .timesheet-day-cell.symbol-work {
+  background: #e2f0d9;
+  color: #2f5d2f;
+}
+
+.timesheet-grid-table .timesheet-day-cell.symbol-paid-leave {
+  background: #fff2cc;
+  color: #7b5b00;
+}
+
+.timesheet-grid-table .timesheet-day-cell.symbol-absent {
+  background: #fbe4e6;
+  color: #8b2331;
+}
+
+.timesheet-grid-table .timesheet-day-cell.symbol-business-trip {
+  background: #ddebf7;
+  color: #1d4f80;
+}
+
+.timesheet-grid-table .timesheet-day-cell.symbol-half-work-leave {
+  background: linear-gradient(180deg, #e2f0d9 0%, #e2f0d9 50%, #fff2cc 50%, #fff2cc 100%);
+}
+
+.timesheet-grid-table .timesheet-day-cell.symbol-half-leave-work {
+  background: linear-gradient(180deg, #fff2cc 0%, #fff2cc 50%, #e2f0d9 50%, #e2f0d9 100%);
+}
+
+.timesheet-grid-table .timesheet-day-cell.symbol-half-leave-absent {
+  background: linear-gradient(180deg, #fff2cc 0%, #fff2cc 50%, #fbe4e6 50%, #fbe4e6 100%);
+  color: #744033;
+}
+
+.timesheet-grid-table .timesheet-day-cell.symbol-half-absent-leave {
+  background: linear-gradient(180deg, #fbe4e6 0%, #fbe4e6 50%, #fff2cc 50%, #fff2cc 100%);
+  color: #744033;
+}
+
+.timesheet-grid-table .timesheet-name-cell {
+  text-align: left;
+}
+
+.timesheet-name-cell strong {
+  display: block;
+  color: #173b4b;
+}
+
+.timesheet-name-meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: normal;
+  word-wrap: break-word;
+}
+
+.timesheet-grid-table tbody tr:nth-child(even) td:not(.sticky-col):not(.timesheet-day-cell.is-weekend):not(.timesheet-summary-cell) {
+  background: #fbfcfe;
+}
+
+.panel th,
+.panel td {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.panel th {
+  color: #475569;
+  background: #f8fafc;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.compact table {
+  min-width: 520px;
+}
+
+
+.custom-toolbar-container {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  min-width: 1100px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.toolbar-inputs-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.toolbar-date-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 0 12px;
+}
+
+.date-tag {
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.toolbar-date-box input {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: #374151;
+  font-size: 14px;
+  box-shadow: none;
+}
+
+.toolbar-separator {
+  color: #9ca3af;
+  font-weight: 700;
+}
+
+.toolbar-vertical-line {
+  width: 1px;
+  height: 24px;
+  background: #e5e7eb;
+}
+
+.toolbar-file-box {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  min-width: 300px;
+  max-width: 420px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 0 8px;
+}
+
+.toolbar-file-box input {
+  margin: 0;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.toolbar-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.btn-toolbar-action {
+  height: 40px !important;
+  border: none !important;
+  border-radius: 8px !important;
+  color: #fff !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12);
+  margin-top: 0 !important;
+  white-space: nowrap;
+}
+
+.btn-toolbar-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-blue {
+  width: 112px;
+  background: #2563eb !important;
+}
+
+.btn-blue:hover:not(:disabled) {
+  background: #1d4ed8 !important;
+}
+
+.btn-notion {
+  width: 192px;
+  background: #1f2937 !important;
+}
+
+.btn-notion:hover:not(:disabled) {
+  background: #0f172a !important;
+}
+
+.btn-emerald {
+  width: 112px;
+  background: #059669 !important;
+}
+
+.btn-emerald:hover:not(:disabled) {
+  background: #047857 !important;
+}
+
+.inline-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
+  flex-shrink: 0 !important;
+}
+
+.btn-action-read {
+  height: 40px !important;
+  width: 120px !important;
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  border: none !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+  transition: background-color 0.2s !important;
+  margin-top: 0 !important;
+  box-shadow: none !important;
+}
+
+.btn-action-read:hover {
+  background-color: #1d4ed8 !important;
+}
+
+.btn-action-save {
+  height: 40px !important;
+  width: 120px !important;
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  border: none !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+  transition: background-color 0.2s !important;
+  margin-top: 0 !important;
+  box-shadow: none !important;
+}
+
+.btn-action-save:hover {
+  background-color: #059669 !important;
+}
+
+@media (max-width: 1360px) {
+  .custom-toolbar-container {
+    min-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-inputs-group {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-file-box {
+    flex: 1 1 340px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 960px) {
+  .custom-toolbar-container {
+    gap: 14px;
+    padding: 12px;
+  }
+
+  .toolbar-vertical-line {
+    display: none;
+  }
+
+  .toolbar-actions-group {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 680px) {
+  .toolbar-inputs-group {
+    gap: 8px;
+  }
+
+  .toolbar-separator {
+    display: none;
+  }
+
+  .toolbar-date-box {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .toolbar-file-box {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .toolbar-actions-group {
+    justify-content: space-between;
+  }
+
+  .btn-blue,
+  .btn-emerald {
+    width: calc(50% - 6px);
+  }
+
+  .btn-notion {
+    width: 100%;
+  }
+}
+
+.dashboard-actions {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  margin: 6px 0 0;
+}
+
+.dashboard-kpi-action,
+.dashboard-actions .dashboard-kpi-action {
+  width: fit-content !important;
+  min-height: 34px !important;
+  height: 34px !important;
+  margin: 0 !important;
+  padding: 7px 11px !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  white-space: nowrap;
+}
+
+.history-actions {
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+/* Override history uses the same spacing, controls and card language as the
+   rest of the enterprise shell instead of the legacy inline form layout. */
+.inline-actions.override-history-actions {
+  display: grid !important;
+  grid-template-columns: minmax(220px, 380px) 110px 180px;
+  justify-content: start;
+  align-items: end !important;
+  gap: 10px !important;
+  margin: 0 0 14px !important;
+  padding: 14px !important;
+  border: 1px solid #dbe7f3;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.inline-actions.override-history-actions label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0 !important;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.inline-actions.override-history-actions .override-history-filter {
+  max-width: 380px;
+}
+
+.inline-actions.override-history-actions input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 38px;
+  margin: 0 !important;
+  border: 1px solid #cbd9e8;
+  border-radius: 9px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.inline-actions.override-history-actions input:focus {
+  outline: none;
+  border-color: #1e91ca;
+  box-shadow: 0 0 0 3px rgba(30, 145, 202, 0.14);
+}
+
+.inline-actions.override-history-actions button {
+  width: 180px !important;
+  height: 38px;
+  margin: 0 !important;
+  border: 1px solid #1e91ca !important;
+  border-radius: 9px !important;
+  padding: 0 12px !important;
+  background: #1e91ca !important;
+  color: #ffffff !important;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 5px 12px rgba(30, 145, 202, 0.18) !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inline-actions.override-history-actions button:hover:not(:disabled) {
+  background: #1679ad !important;
+  transform: translateY(-1px);
+}
+
+.inline-actions.override-history-actions + .table-wrap.compact {
+  margin-top: 0;
+  border: 1px solid #dbe7f3 !important;
+  border-radius: 12px !important;
+  box-shadow: none;
+}
+
+.inline-actions.override-history-actions + .table-wrap.compact table th {
+  padding: 11px 14px !important;
+  border-bottom: 1px solid #dbe7f3;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.inline-actions.override-history-actions + .table-wrap.compact table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #edf2f7;
+  color: #334155;
+  font-size: 13px;
+}
+
+.inline-actions.override-history-actions + .table-wrap.compact table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.inline-actions.override-history-actions + .table-wrap.compact table tbody tr:hover {
+  background: #f8fbff;
+}
+
+@media (max-width: 760px) {
+  .inline-actions.override-history-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-actions.override-history-actions button {
+    width: 100% !important;
+  }
+}
+
+.panel .inline-actions button,
+.modal-card .inline-actions button {
+  width: auto;
+  margin-top: 0;
+  padding: 10px 14px;
+}
+
+td input,
+td select {
+  min-width: 120px;
+  margin-top: 0;
+  padding: 10px 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.kpi-card {
+  border: 1px solid #dbe5f0;
+  border-radius: 20px;
+  padding: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.kpi-card h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.kpi-card p {
+  margin: 6px 0 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--brand);
+}
+
+.kpi-symbols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kpi-pill {
+  border: 1px solid #dbe5f0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8fafc;
+  font-size: 13px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 40;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.modal-card {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #fff;
+  padding: 24px;
+  box-shadow: 0 32px 80px -36px rgba(15, 23, 42, 0.45);
+}
+
+.modal-card h2 {
+  margin-top: 0;
+}
+
+@media (max-width: 1100px) {
+  .grid-two {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .card {
+    padding: 18px;
+  }
+
+  .import-action-group {
+    grid-template-columns: 1fr;
+  }
+
+  .import-preview-heading {
+    flex-direction: column;
+  }
+
+  .import-column-filter-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .import-commit-inline-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   FIX TRIET DE LOI UI TOOLBAR CHAM CONG - CAM DE NUT, CAM LECH HANG
+   ========================================================================== */
+
+.custom-toolbar-container {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 20px !important;
+  width: 100% !important;
+  background: #ffffff !important;
+  padding: 16px 20px !important;
+  border-radius: 16px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+  margin-bottom: 24px !important;
+}
+
+.toolbar-inputs-group {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 16px !important;
+  flex: 1 !important;
+}
+
+.toolbar-date-box {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+  background-color: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 8px !important;
+  padding: 0 12px !important;
+  height: 40px !important;
+  width: 170px !important;
+}
+
+.date-tag {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #64748b !important;
+}
+
+.toolbar-date-box input {
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  font-size: 14px !important;
+  color: #334155 !important;
+  width: 100% !important;
+  height: 100% !important;
+  font-family: inherit !important;
+}
+
+.toolbar-separator {
+  color: #94a3b8 !important;
+  font-weight: 600 !important;
+}
+
+.toolbar-vertical-line {
+  height: 24px !important;
+  width: 1px !important;
+  background-color: #e2e8f0 !important;
+}
+
+.toolbar-file-box {
+  display: flex !important;
+  align-items: center !important;
+  height: 40px !important;
+  background-color: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 8px !important;
+  padding: 0 8px !important;
+  max-width: 260px !important;
+}
+
+.toolbar-file-box input {
+  font-size: 13px !important;
+  color: #475569 !important;
+  width: 100% !important;
+}
+
+/* KHOI QUAN LY 3 NUT BAM: TUYET DOI KHONG CHONG LEN NHAU */
+.toolbar-actions-group {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-shrink: 0 !important;
+}
+
+.btn-toolbar-action {
+  height: 40px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border: none !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  white-space: nowrap !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+
+.btn-blue {
+  width: 100px !important;
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.btn-blue:hover {
+  background-color: #1d4ed8 !important;
+}
+
+.btn-emerald {
+  width: 110px !important;
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+}
+
+.btn-emerald:hover {
+  background-color: #059669 !important;
+}
+
+/* NUT NOTION: NOI BAT, KHONG CON BI CHIM */
+.btn-notion {
+  padding: 0 16px !important;
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+  border: 1px solid #334155 !important;
+}
+
+.btn-notion:hover {
+  background-color: #0f172a !important;
+}
+
+/* ==========================================================================
+   FIX DỨT ĐIỂM LỖI CO RÚM NÚT NOTION - ÉP HIỂN THỊ ĐẦY ĐỦ CHỮ
+   ========================================================================== */
+
+/* Tìm các wrapper chứa nút trong tab import và ép layout flex giãn cách rộng */
+.inline-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
+  flex-wrap: wrap !important;
+  /* Cho phép tự xuống hàng nếu màn hình nhỏ, chống đè ép */
+  width: auto !important;
+}
+
+/* Đè bẹp thuộc tính width cố định cũ của button để nút Notion được hiển thị rộng rãi */
+.inline-actions button {
+  height: 40px !important;
+  padding: 0 16px !important;
+  /* Tạo khoảng thở hai bên chữ */
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  white-space: nowrap !important;
+  /* Tuyệt đối không cho chữ tự động nhảy xuống dòng làm méo nút */
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.2s ease !important;
+}
+
+/* Định dạng riêng biệt cho nút Excel thông thường */
+.inline-actions button:not(.ghost):not(.secondary):first-of-type {
+  width: 110px !important;
+  /* Nút đọc file ngắn giữ nguyên */
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* ĐỊNH DẠNG RIỆNGBIỆT CHO NÚT NOTION: Cho phép tự động co giãn theo độ dài của chữ */
+.inline-actions button.ghost,
+.inline-actions button:nth-child(2) {
+  width: auto !important;
+  /* Hủy bỏ hoàn toàn width 100px cũ */
+  min-width: 280px !important;
+  /* Đảm bảo đủ khoảng trống cho chuỗi chữ dài */
+  background-color: #1e293b !important;
+  /* Đổi sang màu xám đen công nghệ của Notion để nổi bật */
+  color: #ffffff !important;
+  border: 1px solid #334155 !important;
+}
+
+.inline-actions button.ghost:hover,
+.inline-actions button:nth-child(2):hover {
+  background-color: #0f172a !important;
+}
+
+/* ==========================================================================
+   HOTFIX CUOI: CHAN TUYET DOI WIDTH 100% LAM DE NUT TOOLBAR
+   ========================================================================== */
+
+.toolbar-actions-group .btn-toolbar-action,
+.inline-actions button {
+  width: auto !important;
+  max-width: none !important;
+  flex: 0 0 auto !important;
+}
+
+.toolbar-actions-group .btn-notion,
+.inline-actions button.ghost,
+.inline-actions button:nth-child(2) {
+  width: auto !important;
+  min-width: 280px !important;
+}
+
+.toolbar-actions-group .btn-blue,
+.toolbar-actions-group .btn-emerald {
+  min-width: 110px !important;
+}
+
+/* ==========================================================================
+   FIX RIENG CHO VUNG CSV NOTION TRONG IMPORT
+   ========================================================================== */
+
+.notion-upload-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 12px !important;
+}
+
+.notion-upload-title {
+  flex: 0 0 auto !important;
+  min-width: 84px !important;
+}
+
+.notion-upload-picker {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  overflow: hidden !important;
+  flex: 0 1 520px !important;
+  width: min(520px, 100%) !important;
+  min-width: 260px !important;
+  max-width: 520px !important;
+  height: 44px !important;
+  padding: 8px 12px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+}
+
+.notion-upload-picker-btn {
+  flex: 0 0 auto !important;
+}
+
+.notion-upload-filename {
+  display: block !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+  color: #334155 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.notion-clear-btn {
+  width: auto !important;
+  min-width: 132px !important;
+  max-width: fit-content !important;
+  flex: 0 0 auto !important;
+  margin-top: 0 !important;
+  padding: 0 14px !important;
+  border-radius: 10px !important;
+  border: 1px solid #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #1e293b !important;
+  box-shadow: none !important;
+  white-space: nowrap !important;
+}
+
+.notion-clear-btn:hover {
+  background: #eef2f7 !important;
+}
+
+@media (max-width: 900px) {
+  .notion-upload-picker {
+    flex: 1 1 100% !important;
+    max-width: none !important;
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modalBackdropIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modalPopIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+#sealink-responsive-toolbar {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  width: 100% !important;
+  background: #ffffff !important;
+  padding: 12px !important;
+  border-radius: 10px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+  margin-bottom: 16px !important;
+  box-sizing: border-box !important;
+}
+
+/* Định hình lưới cho các ô Inputs tự thu nhỏ khi màn hình hẹp */
+.sl-grid-inputs {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+.sl-input-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background-color: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 6px !important;
+  padding: 0 8px !important;
+  height: 36px !important;
+}
+
+.sl-input-item input[type="date"] {
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  font-size: 13px !important;
+  color: #334155 !important;
+  width: 120px !important;
+}
+
+.sl-title {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #64748b !important;
+  white-space: nowrap !important;
+}
+
+.sl-file-box {
+  width: 145px !important;
+  /* Khóa cứng chiều rộng để không bị phình text */
+}
+
+.sl-file-label {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  cursor: pointer !important;
+}
+
+.sl-hide {
+  display: none !important;
+}
+
+.sl-status-tag {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #475569 !important;
+  background-color: #e2e8f0 !important;
+  padding: 2px 8px !important;
+  border-radius: 4px !important;
+  width: 100% !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+}
+
+.sl-status-tag.active {
+  background-color: #dcfce7 !important;
+  color: #15803d !important;
+}
+
+.sl-status-tag.active-notion {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+.sl-btn-reset {
+  background: none !important;
+  border: none !important;
+  color: #ef4444 !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  padding: 0 2px !important;
+  margin-left: 4px !important;
+}
+
+.sl-uid-box {
+  width: 65px !important;
+}
+
+.sl-uid-box input {
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  font-size: 13px !important;
+  width: 100% !important;
+}
+
+/* CỤM NÚT BẤM: KHÓA CHẶT TRÊN MỘT HÀNG NGANG KHÔNG CHO RỚT DỌC */
+.sl-flex-buttons {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex-shrink: 0 !important;
+}
+
+.sl-btn {
+  height: 36px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border: none !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  padding: 0 10px !important;
+}
+
+.sl-blue {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.sl-slate {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+}
+
+.sl-emerald {
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+}
+
+/* Khi màn hình cực kỳ nhỏ (Dưới 1200px) mới cho phép tách thành 2 khối sạch sẽ */
+@media (max-width: 1250px) {
+  #sealink-responsive-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .sl-grid-inputs {
+    flex-wrap: wrap !important;
+    width: 100% !important;
+  }
+
+  .sl-flex-buttons {
+    justify-content: flex-end !important;
+    width: 100% !important;
+  }
+}
+
+/* ==========================================================================
+   GHIM CỐ ĐỊNH THANH MENU ĐIỀU HƯỚNG BÊN TRÁI (SIDEBAR STICKY LAYOUT)
+   ========================================================================== */
+
+/* 1. Ép toàn bộ khung layout chính bọc ngoài của trang web không được tràn block */
+#root,
+.app-container,
+[class*="Shell"] {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  overflow: hidden !important;
+  /* Khóa không cho toàn bộ trang bị cuộn tuột lên */
+  display: flex !important;
+  flex-direction: row !important;
+}
+
+/* 2. Tìm cột chứa thanh menu điều hướng bên trái và ghim cứng nó lại */
+aside,
+[class*="sidebar"],
+[class*="navigation"],
+.enterprise-sidebar {
+  height: 100vh !important;
+  position: sticky !important;
+  top: 0 !important;
+  left: 0 !important;
+  flex-shrink: 0 !important;
+  /* Cấm không cho menu bị bóp nghẹt chiều ngang */
+  background-color: #ffffff !important;
+  border-right: 1px solid #e2e8f0 !important;
+  z-index: 30 !important;
+}
+
+/* 3. Đẩy khu vực nội dung hiển thị bảng công bên phải thành một vùng cuộn độc lập */
+main,
+[class*="content"],
+.main-content,
+.panel {
+  flex: 1 !important;
+  height: 100vh !important;
+  overflow-y: auto !important;
+  /* Chỉ cho phép một mình vùng bên phải này được cuộn lên xuống */
+  padding: 24px !important;
+  box-sizing: border-box !important;
+  background-color: #f8fafc !important;
+}
+
+/* ==========================================================================
+   FIX DỨT ĐIỂM LỖI SIDEBAR BỊ CHÌM CHỮ & MẤT NÚT XEM THÊM
+   ========================================================================== */
+
+/* 1. KHÔI PHỤC MÀU SẮC SANG TRỌNG CHO SIDEBAR BÊN TRÁI */
+aside,
+[class*="sidebar"],
+[class*="navigation"],
+.enterprise-sidebar {
+  background-color: #0f172a !important;
+  /* Đổi sang màu xanh đen Charcoal Dark cao cấp */
+  border-right: 1px solid #1e293b !important;
+  padding: 16px 12px !important;
+}
+
+/* Ép màu chữ của các Tab menu bên trái luôn hiển thị rõ ràng, nổi bật */
+aside a,
+aside button,
+[class*="sidebar"] button,
+[class*="sidebar"] a,
+.enterprise-sidebar button,
+.enterprise-sidebar a {
+  color: #94a3b8 !important;
+  /* Màu xám sáng */
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  transition: all 0.2s ease !important;
+}
+
+/* Hiệu ứng khi di chuột hoặc khi Tab đang được kích hoạt (Active) */
+aside button:hover,
+aside a:hover,
+[class*="sidebar"] button:hover,
+.enterprise-sidebar button[class*="active"] {
+  color: #ffffff !important;
+  /* Chữ trắng sáng tinh khôi */
+  background-color: #1e293b !important;
+  /* Nền tab tối hơn */
+  border-radius: 8px !important;
+}
+
+
+/* 2. ÉP HIỆN NÚT "XEM THÊM" DƯỚI ĐÁY DANH SÁCH NHÂN VIÊN */
+/* Giải phóng không gian, cấm bóp nghẹt hoặc che khuất nút */
+main,
+[class*="content"],
+.main-content,
+.panel {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100vh !important;
+  overflow-y: auto !important;
+  /* Cho phép cuộn trang thoải mái để thấy nút */
+}
+
+/* Định vị nút Xem thêm luôn nằm ngăn nắp dưới đáy dải danh sách dữ liệu thô */
+.load-more-container,
+[class*="load-more"],
+.import-table-wrap+button,
+.load-more-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 24px auto !important;
+  /* Căn giữa nút */
+  padding: 10px 24px !important;
+  height: 40px !important;
+  min-width: 140px !important;
+  background-color: #2563eb !important;
+  /* Màu xanh dương nổi bật */
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  border-radius: 8px !important;
+  border: none !important;
+  cursor: pointer !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2) !important;
+}
+
+.load-more-container:hover,
+[class*="load-more"]:hover,
+.import-table-wrap+button:hover,
+.load-more-btn:hover {
+  background-color: #1d4ed8 !important;
+}
+
+/* ==========================================================================
+   SỬA LỖI ĐÓNG BĂNG HỆ THỐNG - MỞ KHÓA CUỘN CHUỘT XEM REPORT
+   ========================================================================== */
+
+/* 1. Giải phóng khung màn hình chính cho phép nội dung hoạt động linh hoạt */
+#root,
+.app-container,
+[class*="Shell"] {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  display: flex !important;
+  flex-direction: row !important;
+  overflow: hidden !important;
+  /* Khóa lớp nền tổng không cho tràn, nhưng phải mở khoang bên phải */
+}
+
+/* 2. Cột menu Sidebar bên trái: Khóa cứng cố định không cho trôi */
+aside,
+[class*="sidebar"],
+[class*="navigation"],
+.enterprise-sidebar {
+  height: 100vh !important;
+  position: sticky !important;
+  top: 0 !important;
+  left: 0 !important;
+  flex-shrink: 0 !important;
+  background-color: #0f172a !important;
+  /* Đảm bảo giữ màu tối công nghệ rõ nét */
+  overflow-y: auto !important;
+  /* Nếu menu quá dài vẫn tự cuộn bên trong nó */
+}
+
+/* 3. KHU VỰC QUAN TRỌNG: Mở khóa quyền cuộn chuột dốc dọc cho vùng hiển thị Report bên phải */
+main,
+[class*="content"],
+.main-content,
+.panel,
+#main-panel {
+  flex: 1 !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+
+  /* ĐÂY LÀ ĐOẠN MÃ KHÔI PHỤC QUYỀN CUỘN CHUỘT */
+  overflow-y: scroll !important;
+  /* Ép buộc luôn hiển thị thanh cuộn dọc khi dữ liệu tràn ra */
+  overflow-x: hidden !important;
+  /* Cấm tràn hàng ngang làm vỡ layout */
+
+  padding: 24px !important;
+  box-sizing: border-box !important;
+  background-color: #f8fafc !important;
+  display: block !important;
+  /* Trả về dạng khối tiêu chuẩn để dữ liệu thô rải dọc xuống dưới */
+}
+
+/* Đảm bảo khối bọc danh sách nhân viên không bó hẹp chiều cao */
+.import-preview-container,
+[class*="preview"],
+.grid-two {
+  height: auto !important;
+  min-height: 100% !important;
+  overflow: visible !important;
+  /* Ép hiển thị tràn ra ngoài để thanh cuộn cha xử lý */
+}
+
+.sl-fixed-toolbar-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  width: 100% !important;
+  background: #ffffff !important;
+  padding: 12px 16px !important;
+  border-radius: 12px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+  margin-bottom: 20px !important;
+  box-sizing: border-box !important;
+}
+
+.sl-inputs-left-side {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
+  flex: 1 !important;
+}
+
+.sl-date-field-group {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.sl-input-wrapper {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background-color: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 6px !important;
+  padding: 0 8px !important;
+  height: 36px !important;
+  width: 135px !important;
+}
+
+.sl-prefix {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #64748b !important;
+}
+
+.sl-input-wrapper input,
+.sl-userid-wrapper input {
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  font-size: 13px !important;
+  color: #334155 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.sl-range-tilde {
+  color: #94a3b8 !important;
+  font-weight: 600 !important;
+}
+
+.sl-vertical-line {
+  height: 20px !important;
+  width: 1px !important;
+  background-color: #e2e8f0 !important;
+}
+
+.sl-upload-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.sl-input-label {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: #475569 !important;
+  white-space: nowrap !important;
+}
+
+.sl-custom-upload-btn {
+  display: flex !important;
+  align-items: center !important;
+  height: 36px !important;
+  width: 110px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 6px !important;
+  padding: 0 6px !important;
+  background-color: #f8fafc !important;
+  cursor: pointer !important;
+}
+
+.sl-hidden-file {
+  display: none !important;
+}
+
+.sl-tag-status {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #475569 !important;
+  width: 100% !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+}
+
+.sl-btn-delete-csv {
+  height: 24px !important;
+  padding: 0 6px !important;
+  background-color: #fff1f2 !important;
+  border: 1px solid #fecdd3 !important;
+  color: #be123c !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  margin-left: 4px !important;
+}
+
+.sl-userid-wrapper {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  background-color: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 6px !important;
+  padding: 0 6px !important;
+  height: 36px !important;
+  width: 65px !important;
+}
+
+/* KHỐI NÚT BẤM: ÉP CỨNG NẰM NGANG CẠNH NHAU, TUYỆT ĐỐI CẤM CO RÚM */
+.sl-buttons-right-side {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-shrink: 0 !important;
+}
+
+/* KEYFRAMES */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+@keyframes modalBackdropIn {
+  0% {
+    opacity: 0;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  100% {
+    opacity: 1;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@keyframes modalPopIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.loading-shimmer {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.2) 50%, rgba(255, 255, 255, 0) 100%) !important;
+  background-size: 1000px 100% !important;
+  animation: shimmer 2s infinite linear !important;
+}
+
+/* HIỆU ỨNG HOVER VÀ TRANSITION CHO TẤT CẢ CÁC NÚT BẤM CHẤM CÔNG */
+.sl-btn-action {
+  height: 36px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border: none !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+
+  /* Thêm thuộc tính chuyển động mượt mà */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* 1. Hover nút Đọc file vân tay */
+.sl-color-blue {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.sl-color-blue:hover {
+  background-color: #1d4ed8 !important;
+  transform: scale(1.02) !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2) !important;
+  /* Đổ bóng phát sáng xanh */
+}
+
+.sl-color-blue:active {
+  transform: scale(0.98) !important;
+}
+
+/* 2. Hover nút Khớp đơn Notion */
+.sl-color-slate {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+}
+
+.sl-color-slate:hover {
+  background-color: #0f172a !important;
+  transform: scale(1.02) !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15) !important;
+}
+
+.sl-color-slate:active {
+  transform: scale(0.98) !important;
+}
+
+/* 3. Hover nút Xác nhận & Lưu dữ liệu */
+.sl-color-emerald {
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+}
+
+.sl-color-emerald:hover {
+  background-color: #059669 !important;
+  transform: scale(1.02) !important;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25) !important;
+  /* Đổ bóng phát sáng xanh lá */
+}
+
+.sl-color-emerald:active {
+  transform: scale(0.98) !important;
+}
+
+/* Định dạng hiển thị Logo Sealink chuẩn chỉnh không bị méo */
+.sealink-logo-container {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  margin: -5px -5px 15px -5px !important;
+  width: calc(100% + 10px) !important;
+}
+
+.sealink-main-logo {
+  width: 100% !important;
+  height: auto !important;
+  max-height: none !important;
+  object-fit: cover !important;
+  border-radius: 12px !important;
+  filter: drop-shadow(0 2px 6px rgba(30, 58, 138, 0.12)) !important;
+}
+
+/* Hạ hàng tự động gọn gàng chỉ khi màn hình cực nhỏ dưới 1300px */
+@media (max-width: 1340px) {
+  .sl-fixed-toolbar-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+
+  .sl-inputs-left-side {
+    flex-wrap: wrap !important;
+    width: 100% !important;
+  }
+
+  .sl-buttons-right-side {
+    justify-content: flex-end !important;
+    width: 100% !important;
+  }
+}
+
+/* ==========================================================================
+   TÁI THIẾT KẾ UI MỐC GIỜ GIỮA - TỐI GIẢN, TINH TẾ VÀ DỄ NHÌN HƠN
+   ========================================================================== */
+
+/* NÚT 3 CHẤM SIÊU NHỎ, MÀU MỜ TINH TẾ */
+.sl-mini-dots-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+
+  /* Thu nhỏ kích thước nút */
+  width: 65px !important;
+  height: 20px !important;
+  margin: 2px auto 0 auto !important;
+  padding: 0 6px !important;
+
+  /* Màu mờ tinh tế hòa vào nền trắng */
+  background-color: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 4px !important;
+
+  cursor: pointer !important;
+  box-shadow: none !important;
+  /* Hiệu ứng mượt mà khi di chuột */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* HIỆU ỨNG HOVER: Sáng nhẹ lên và đổi màu chữ sang xanh dương */
+.sl-mini-dots-btn:hover {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  transform: translateY(-0.5px) !important;
+  /* Nhích nhẹ lên tạo cảm giác bấm */
+}
+
+.sl-mini-dots-btn:hover .sl-mini-dots {
+  color: #3b82f6 !important;
+  /* Dấu 3 chấm đổi màu xanh khi hover */
+}
+
+/* Dấu 3 chấm nhỏ mờ */
+.sl-mini-dots {
+  color: #94a3b8 !important;
+  /* Màu xám mờ nhẹ */
+  font-size: 11px !important;
+  letter-spacing: 0.5px !important;
+  line-height: 1 !important;
+  transition: color 0.2s ease !important;
+}
+
+/* Số mốc ẩn siêu nhỏ */
+.sl-mini-badge {
+  font-size: 9px !important;
+  font-weight: 600 !important;
+  color: #64748b !important;
+  line-height: 1 !important;
+}
+
+/* Khối bao bọc khi mở rộng nằm dưới cùng */
+.sl-expanded-container {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 4px !important;
+  margin-top: 4px !important;
+}
+
+.sl-expanded-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 4px !important;
+  background-color: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  padding: 6px !important;
+  border-radius: 6px !important;
+  width: 100% !important;
+}
+
+.sl-middle-tag {
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  text-align: center !important;
+  padding: 2px 4px !important;
+  background-color: #ffffff !important;
+  color: #475569 !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 4px !important;
+}
+
+.sl-minimal-close-btn {
+  background: none !important;
+  border: none !important;
+  color: #94a3b8 !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  padding: 2px 6px !important;
+}
+
+.sl-minimal-close-btn:hover {
+  color: #ef4444 !important;
+  /* Đổi sang màu đỏ nhạt báo hiệu đóng khi hover */
+  text-decoration: underline !important;
+}
+
+.sl-main-time-tag {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: #1e293b !important;
+  background-color: #f1f5f9 !important;
+  padding: 4px 8px !important;
+  border-radius: 6px !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+/* ==========================================================================
+   TIÊU DIỆT 4 THANH CUỘN THỪA - QUY CHUẨN PHÂN KHOANG CUỘN MƯỢT MÀ
+   ========================================================================== */
+
+/* 1. KHÓA CỨNG KHUNG NỀN TỔNG: Tuyệt đối không cho trình duyệt xuất hiện thanh cuộn ngoài cùng */
+html,
+body,
+#root,
+.app-container,
+[class*="Shell"],
+[class*="layout"] {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  min-height: 100vh !important;
+  overflow: hidden !important;
+  /* Triệt hạ thanh cuộn ngoài cùng bên phải */
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* 2. GHIM CỨNG THANH MENU BÊN TRÁI: Đóng băng hoàn toàn, ẩn thanh cuộn của menu */
+aside,
+[class*="sidebar"],
+[class*="navigation"],
+.enterprise-sidebar {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  position: sticky !important;
+  top: 0 !important;
+  left: 0 !important;
+  flex-shrink: 0 !important;
+  z-index: 50 !important;
+
+  /* Ẩn hoàn toàn thanh cuộn thừa cạnh menu nếu có */
+  overflow-y: hidden !important;
+}
+
+/* 3. KHU VỰC ĐỘC TÔN: Chỉ mở duy nhất 1 thanh cuộn dọc cho vùng nội dung báo cáo bên phải */
+main,
+[class*="content"],
+.main-content,
+.panel,
+#main-panel {
+  flex: 1 !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+
+  /* ÉP BUỘC CHỈ MỞ TẠI ĐÂY */
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  /* Cấm tràn hàng ngang */
+
+  padding: 24px !important;
+  background-color: #f8fafc !important;
+  box-sizing: border-box !important;
+}
+
+/* 4. GIẢI PHÓNG KHỐI BẢNG VÀ CARD BÊN TRONG ĐỂ KHÔNG TỰ SINH THANH CUỘN LẺ */
+.import-layout,
+.import-workspace,
+.employee-preview-panel,
+.import-preview-box,
+.panel>div {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  /* Nhường quyền cuộn hoàn toàn cho thẻ main ở trên */
+}
+
+/* Cấu hình thanh cuộn bên phải nhìn mảnh mai, hiện đại hơn */
+main::-webkit-scrollbar {
+  width: 6px !important;
+}
+
+main::-webkit-scrollbar-track {
+  background: #f1f5f9 !important;
+}
+
+main::-webkit-scrollbar-thumb {
+  background: #cbd5e1 !important;
+  border-radius: 999px !important;
+}
+
+main::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
+}
+
+/* ==========================================================================
+   ĐỒNG BỘ GIAO DIỆN & SẮP XẾP THẲNG HÀNG CÁC Ô NHẬP LIỆU / SELECT / DATE
+   ========================================================================== */
+
+/* Fix lỗi tràn viền và lệch chiều cao date input trong toolbar trên cùng */
+.sl-input-wrapper {
+  width: 175px !important;
+  /* Mở rộng chiều rộng để không bị che khuất ngày tháng năm */
+}
+
+.sl-input-wrapper input,
+.sl-userid-wrapper input {
+  margin: 0 !important;
+  padding: 0 4px !important;
+  border-radius: 0 !important;
+  height: 100% !important;
+  width: 100% !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+}
+
+/* Đảm bảo toàn bộ form input, select trên website có chiều cao và thiết kế đồng bộ */
+.panel input,
+.panel select,
+.modal-card input,
+.modal-card select {
+  height: 40px !important;
+  padding: 8px 12px !important;
+  border-radius: 8px !important;
+  border: 1px solid #cbd5e1 !important;
+  font-size: 13px !important;
+  box-sizing: border-box !important;
+  margin-top: 6px !important;
+}
+
+/* Căn chỉnh thẳng hàng cho lưới cấu hình Loại file, Chế độ import, v.v. */
+.sl-aligned-label {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-end !important;
+  height: 100% !important;
+}
+
+.sl-aligned-label-text {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #475569 !important;
+  margin-bottom: 2px !important;
+  min-height: 38px !important;
+  /* Đảm bảo chiều cao tối thiểu 2 dòng để thẳng hàng select */
+  display: flex !important;
+  align-items: flex-end !important;
+  /* Căn dưới chữ */
+}
+
+/* Định hình và căn chỉnh cho mapping grid ở dưới cùng */
+.sl-mapping-label {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-end !important;
+  height: 100% !important;
+}
+
+.sl-mapping-label-text {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #475569 !important;
+  margin-bottom: 2px !important;
+  min-height: 38px !important;
+  /* Đồng bộ chiều cao nhãn để các dropdown thẳng tắp */
+  display: flex !important;
+  align-items: flex-end !important;
+}
+
+.sl-mapping-label select {
+  height: 40px !important;
+  padding: 8px 12px !important;
+  border-radius: 8px !important;
+  border: 1px solid #cbd5e1 !important;
+  font-size: 13px !important;
+  background-color: #ffffff !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  margin-top: 6px !important;
+}
+
+/* ==========================================================================
+   TỐI ƯU HÓA GIAO DIỆN & CĂN CHỈNH THẲNG HÀNG TOOLBAR BUTTONS VÀ INPUTS
+   ========================================================================== */
+
+/* Đảm bảo wrapper và button có chiều cao đồng nhất */
+.sl-fixed-toolbar-row .sl-input-wrapper,
+.sl-fixed-toolbar-row .sl-userid-wrapper,
+.sl-fixed-toolbar-row .sl-custom-upload-btn,
+.sl-fixed-toolbar-row .sl-btn-action {
+  height: 36px !important;
+  box-sizing: border-box !important;
+}
+
+/* Sửa triệt để lỗi double border và margin-top của input trong wrapper */
+.panel .sl-input-wrapper input,
+.panel .sl-userid-wrapper input {
+  margin: 0 !important;
+  padding: 0 4px !important;
+  border-radius: 0 !important;
+  height: 100% !important;
+  width: 100% !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+  background: transparent !important;
+  align-self: center !important;
+}
+
+/* Thiết kế nút tải file upload thẩm mĩ hơn với hiệu ứng tương tác mượt mà */
+.sl-custom-upload-btn {
+  justify-content: center !important;
+  background-color: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.sl-custom-upload-btn:hover {
+  background-color: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  transform: translateY(-0.5px) !important;
+}
+
+.sl-custom-upload-btn:active {
+  transform: translateY(0) !important;
+}
+
+/* Đồng bộ khoảng cách và chiều dọc cho các upload item */
+.sl-upload-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 36px !important;
+}
+
+/* Căn chỉnh label để thẳng tắp */
+.sl-input-label {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #475569 !important;
+  display: flex !important;
+  align-items: center !important;
+  height: 100% !important;
+}
+
+/* ==========================================================================
+   TIÊU DIỆT 4 THANH CUỘN THỪA - QUY CHUẨN PHÂN KHOANG CUỘN MƯỢT MÀ
+   ========================================================================== */
+
+/* 1. KHÓA CỨNG KHUNG NỀN TỔNG: Tuyệt đối không cho trình duyệt xuất hiện thanh cuộn ngoài cùng */
+html,
+body,
+#root,
+.app-container,
+[class*="Shell"],
+[class*="layout"] {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  min-height: 100vh !important;
+  overflow: hidden !important;
+  /* Triệt hạ thanh cuộn ngoài cùng bên phải */
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* 2. GHIM CỨNG THANH MENU BÊN TRÁI: Đóng băng hoàn toàn, ẩn thanh cuộn của menu */
+aside,
+[class*="sidebar"],
+[class*="navigation"],
+.enterprise-sidebar {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  position: sticky !important;
+  top: 0 !important;
+  left: 0 !important;
+  flex-shrink: 0 !important;
+  z-index: 50 !important;
+
+  /* Ẩn hoàn toàn thanh cuộn thừa cạnh menu nếu có */
+  overflow-y: hidden !important;
+}
+
+aside>div,
+aside [class*="sticky"] {
+  scrollbar-width: none !important;
+  /* Firefox */
+}
+
+aside>div::-webkit-scrollbar,
+aside [class*="sticky"]::-webkit-scrollbar {
+  display: none !important;
+  /* Safari and Chrome */
+}
+
+/* 3. KHU VỰC ĐỘC TÔN: Chỉ mở duy nhất 1 thanh cuộn dọc cho vùng nội dung báo cáo bên phải */
+main,
+[class*="content"],
+.main-content,
+.panel,
+#main-panel {
+  flex: 1 !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+
+  /* ÉP BUỘC CHỈ MỞ TẠI ĐÂY */
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  /* Cấm tràn hàng ngang */
+
+  padding: 24px !important;
+  background-color: #f8fafc !important;
+  box-sizing: border-box !important;
+}
+
+/* 4. GIẢI PHÓNG KHỐI BẢNG VÀ CARD BÊN TRONG ĐỂ KHÔNG TỰ SINH THANH CUỘN LẺ */
+.import-layout,
+.import-workspace,
+.employee-preview-panel,
+.import-preview-box,
+.panel>div {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  /* Nhường quyền cuộn hoàn toàn cho thẻ main ở trên */
+}
+
+/* Cấu hình thanh cuộn bên phải nhìn mảnh mai, hiện đại hơn */
+main::-webkit-scrollbar {
+  width: 6px !important;
+}
+
+main::-webkit-scrollbar-track {
+  background: #f1f5f9 !important;
+  border-radius: 999px !important;
+}
+
+main::-webkit-scrollbar-thumb {
+  background: #cbd5e1 !important;
+  border-radius: 999px !important;
+}
+
+main::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
+}
+
+/* ==========================================================================
+   TRIỆT TIÊU MARGIN BẤT THƯỜNG TRÊN HORIZONTAL GRID LABELS
+   ========================================================================== */
+
+/* Tránh quy tắc .panel label+label tự động đẩy các label ở cột sau xuống dưới */
+.panel .sl-aligned-label,
+.panel .sl-mapping-label,
+.panel .grid>label,
+.panel [class*="grid"]>label {
+  margin-top: 0 !important;
+}
+
+/* Đảm bảo khoảng cách giữa nhãn và ô nhập liệu bên trong grid cân đối */
+.panel .grid>label input,
+.panel .grid>label select,
+.panel [class*="grid"]>label input,
+.panel [class*="grid"]>label select {
+  margin-top: 8px !important;
+}
+
+
+/* ĐỒNG BỘ PHÔNG CHỮ VÀ KHÓA MÀU SÁNG TOÀN DIỆN CHO WEB */
+*,
+*::before,
+*::after,
+html,
+body,
+#root,
+input,
+button,
+select,
+textarea {
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ==========================================================================
+   CƯỜNG CHẾ TOÀN DIỆN GIAO DIỆN SÁNG CAO CẤP (KHẮC PHỤC LỖI KHÔNG ĐỔI MÀU)
+   ========================================================================== */
+
+/* 1. NỀN TỔNG THỂ CỦA WEBSITE */
+main,
+.main-content,
+#main-panel,
+.panel,
+.app-container {
+  background-color: #f4f7fa !important;
+  color: #1e293b !important;
+}
+
+/* 2. CÁC KHỐI CARD CHỨA THÔNG TIN */
+.card,
+div[class*="card"] {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03) !important;
+  color: #1e293b !important;
+  border-radius: 12px !important;
+}
+
+/* Tiêu đề chữ lớn của Card */
+.card h2,
+.card h3,
+div[class*="card"] h2 {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+}
+
+/* 3. TÁI ĐỊNH DẠNG HỘP DEBUG CONSOLE THÀNH TÔNG SÁNG */
+.mt-6.w-full.bg-slate-900,
+div[class*="bg-slate-900"],
+div[font-mono],
+.font-mono {
+  background-color: #ffffff !important;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02) !important;
+}
+
+/* Thanh tiêu đề của hộp Debug */
+.mt-6.w-full.bg-slate-900>div:first-child,
+div[class*="bg-slate-900"]>div:first-child {
+  border-bottom: 1px solid #e2e8f0 !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Toàn bộ chữ mô tả công thức */
+.text-slate-200,
+.text-slate-300,
+.text-slate-400,
+.text-slate-500 {
+  color: #475569 !important;
+}
+
+/* Tiêu đề công thức [1], [2], [3] chuyển sang xanh đậm hoàng gia */
+.text-amber-400 {
+  color: #1d4ed8 !important;
+  font-weight: 700 !important;
+}
+
+/* Đoạn mã code bên trong hộp Debug */
+code,
+.font-mono code {
+  font-family: Roboto, Arial, sans-serif !important;
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border: 1px solid #e2e8f0 !important;
+  padding: 2px 5px !important;
+  border-radius: 4px !important;
+}
+
+/* Hộp tổng kết dưới đáy Debug chuyển sang màu xanh Indigo của Excel */
+.bg-slate-950,
+div[class*="bg-slate-950"] {
+  background-color: #d9e1f2 !important;
+  border: 1px solid #b4c6e7 !important;
+  color: #1f4e78 !important;
+}
+
+.text-sky-400 {
+  color: #1f4e78 !important;
+  font-weight: 700 !important;
+}
+
+/* 4. PHỐI MÀU CARD SỐ TỔNG (KPI CARDS) CHUYÊN NGHIỆP */
+.card:has(.text-emerald-500) {
+  background-color: #e2f0d9 !important;
+  border-color: #c6e0b4 !important;
+}
+
+.card:has(.text-amber-500) {
+  background-color: #d9e1f2 !important;
+  border-color: #b4c6e7 !important;
+}
+
+/* Các dòng text công thức nhỏ dưới đáy KPI */
+.text-amber-500.block,
+.text-slate-400.block,
+.text-emerald-500.block {
+  color: #64748b !important;
+  font-weight: 500 !important;
+  font-size: 11px !important;
+}
+
+/* 5. ĐỊNH DẠNG NÚT THU GỌN THANH CÔNG CỤ (TOOLBAR TOGGLE) MƯỢT MÀ */
+.sl-toolbar-wrapper {
+  transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  max-height: 1200px;
+  overflow: hidden;
+  opacity: 1;
+}
+
+.sl-toolbar-wrapper.collapsed {
+  max-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.sl-toggle-toolbar-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #475569 !important;
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  margin-bottom: 16px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+
+.sl-toggle-toolbar-btn:hover {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+/* Bảng công: giữ phần tải dữ liệu gọn theo đúng nội dung, không kéo giãn
+   khoảng trống bởi các quy tắc layout tổng quát cũ. */
+.import-layout {
+  display: block !important;
+  min-height: 0 !important;
+}
+
+.import-workspace {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  align-content: flex-start !important;
+  gap: 16px !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: 20px !important;
+  overflow: visible !important;
+}
+
+.import-workspace .import-intro {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+}
+
+.import-workspace .sl-toolbar-wrapper {
+  flex: 0 0 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.import-workspace .sl-fixed-toolbar-row {
+  margin: 0 !important;
+}
+
+.import-workspace .import-preview-box {
+  flex: 0 0 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding-top: 16px !important;
+  overflow: visible !important;
+}
+
+/* Bọc bảng công trong một vùng cuộn riêng để không kéo dài toàn bộ trang. */
+.timesheet-grid-scroll {
+  max-height: min(68vh, 640px) !important;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.timesheet-grid-scroll .timesheet-grid-table {
+  margin: 0;
+}
+
+.timesheet-grid-scroll .timesheet-grid-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.timesheet-grid-scroll .timesheet-grid-table thead .sticky-col {
+  z-index: 8;
+}
+
+/* ==========================================================================
+   FORCE COLLAPSED SIDEBAR TO COMPLETELY COLLAPSE AND HIDE OVERFLOWS
+   ========================================================================== */
+aside,
+[class*="sidebar"],
+[class*="navigation"],
+.enterprise-sidebar {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              padding 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+aside.collapsed,
+[class*="sidebar"].collapsed,
+[class*="navigation"].collapsed,
+.enterprise-sidebar.collapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  border-right: none !important;
+  overflow: hidden !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+/* Fix checkbox and select sizes in timesheet day cells to keep the table compact */
+.timesheet-day-cell input[type="checkbox"] {
+  min-width: auto !important;
+  width: 13px !important;
+  height: 13px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 4px !important;
+}
+
+.timesheet-day-cell select {
+  min-width: auto !important;
+  width: auto !important;
+  padding: 2px 4px !important;
+  margin: 0 !important;
+  font-size: 11px !important;
+  height: auto !important;
+  line-height: 1.2 !important;
+}
+
+/* Override .panel button styles for the department delete button */
+.panel button.dept-delete-btn {
+  position: absolute !important;
+  top: 8px !important;
+  right: 8px !important;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #94a3b8 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 8px !important;
+  transition: all 0.2s ease !important;
+}
+
+.panel button.dept-delete-btn:hover {
+  color: #dc2626 !important;
+  background-color: #fee2e2 !important;
+  transform: none !important;
+}
+
+/* Custom class to override panel button styling for Add Department button */
+.panel button.add-dept-btn {
+  width: auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: #163B66 !important;
+  color: white !important;
+  font-weight: 600 !important;
+  padding: 8px 16px !important;
+  margin: 0 !important;
+  border-radius: 8px !important;
+  font-size: 14px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+  border: none !important;
+  transition: all 0.2s ease !important;
+}
+
+.panel button.add-dept-btn:hover {
+  background: #0f294a !important;
+  transform: translateY(-1px) !important;
+}
+
+/* Compact department tree controls. These overrides intentionally neutralize
+   the legacy .panel button rule, which otherwise stretches every action to
+   the full card width. */
+#root main .panel button.department-tree-toggle {
+  width: 30px !important;
+  min-width: 30px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #475569 !important;
+  background: #f8fafc !important;
+  background-image: none !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+#root main .panel button.department-action-button {
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 32px !important;
+  margin: 0 !important;
+  padding: 6px 10px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  color: #334155 !important;
+  background: #f8fafc !important;
+  background-image: none !important;
+  border: 1px solid #dbe3ed !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+#root main .panel button.department-action-button:hover:not(:disabled),
+#root main .panel button.department-tree-toggle:hover:not(:disabled) {
+  color: #0f172a !important;
+  background: #eef2f7 !important;
+  background-image: none !important;
+  border-color: #b8c5d5 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+#root main .panel button.department-action-danger {
+  width: 32px !important;
+  padding: 0 !important;
+  color: #dc2626 !important;
+  background: #fff7f7 !important;
+  border-color: #fecaca !important;
+}
+
+#root main .panel button.department-action-danger:hover:not(:disabled) {
+  color: #b91c1c !important;
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+}
+
+/* Department dialogs are portalled to <body> so legacy .panel layout rules
+   cannot stretch them into a blank page or hide the page underneath. */
+.department-modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 300 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 20px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: auto !important;
+  background: rgb(15 23 42 / 6%) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.department-modal-surface {
+  position: relative;
+  z-index: 1;
+  margin: auto;
+  animation: department-modal-enter 160ms ease-out;
+}
+
+@keyframes department-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+button.department-modal-icon-button,
+#root main .panel button.department-modal-icon-button {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #475569 !important;
+  background: #f8fafc !important;
+  background-image: none !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 9px !important;
+  box-shadow: none !important;
+}
+
+button.department-modal-button,
+#root main .panel button.department-modal-button {
+  width: auto !important;
+  min-width: 88px !important;
+  min-height: 36px !important;
+  margin: 0 !important;
+  padding: 7px 14px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #334155 !important;
+  background: #f8fafc !important;
+  background-image: none !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 9px !important;
+  box-shadow: none !important;
+  font-size: 13px !important;
+}
+
+button.department-modal-button-primary,
+#root main .panel button.department-modal-button-primary {
+  color: #fff !important;
+  background: #1d4f7d !important;
+  border-color: #1d4f7d !important;
+}
+
+button.department-modal-button-primary:hover:not(:disabled),
+#root main .panel button.department-modal-button-primary:hover:not(:disabled) {
+  color: #fff !important;
+  background: #153d63 !important;
+  border-color: #153d63 !important;
+}
+
+button.department-employee-card,
+#root main .panel button.department-employee-card {
+  width: 100% !important;
+  min-height: 58px !important;
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  text-align: left !important;
+  color: #334155 !important;
+  background: #fff !important;
+  background-image: none !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+button.department-employee-card:hover:not(:disabled),
+#root main .panel button.department-employee-card:hover:not(:disabled) {
+  background: #f8fafc !important;
+  border-color: #b8c5d5 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Fix checkbox styling in modal cards and panels */
+.panel input[type="checkbox"],
+.modal-card input[type="checkbox"] {
+  height: 16px !important;
+  width: 16px !important;
+  padding: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  box-sizing: content-box !important;
+  display: inline-block !important;
+}
+
+/* ===========================================================================
+   ACTION BUTTON SYSTEM
+   A single neutral treatment for application actions. Navigation keeps its
+   dedicated styling so the active location remains easy to recognise.
+   =========================================================================== */
+#root main button:not(.dept-delete-btn),
+#root .login-form > button[type="submit"],
+#root .ui-modal-backdrop button,
+#root .fixed.inset-0 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  width: auto;
+  max-width: 100%;
+  padding: 7px 14px;
+  color: #111827 !important;
+  background-color: #f5f8fb !important;
+  background-image: linear-gradient(180deg, #ffffff 0%, #eef3f8 100%) !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 6px 16px -13px rgb(15 23 42 / 52%) !important;
+  font-weight: 650 !important;
+  text-shadow: none !important;
+  cursor: pointer;
+  line-height: 1.2;
+  will-change: transform;
+  transition: transform .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .18s ease !important;
+}
+
+#root main button:not(.dept-delete-btn):hover:not(:disabled),
+#root .login-form > button[type="submit"]:hover:not(:disabled),
+#root .ui-modal-backdrop button:hover:not(:disabled),
+#root .fixed.inset-0 button:hover:not(:disabled) {
+  color: #111827 !important;
+  background-color: #e2e8f0 !important;
+  background-image: linear-gradient(180deg, #f8fbff 0%, #dce7f2 100%) !important;
+  border-color: #7f9bb8 !important;
+  box-shadow: 0 10px 22px -14px rgb(15 23 42 / 66%) !important;
+  transform: translateY(-2px);
+}
+
+#root main button:not(.dept-delete-btn):active:not(:disabled),
+#root .login-form > button[type="submit"]:active:not(:disabled),
+#root .ui-modal-backdrop button:active:not(:disabled),
+#root .fixed.inset-0 button:active:not(:disabled) {
+  background-color: #cbd5e1 !important;
+  background-image: none !important;
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 12%) !important;
+  transform: translateY(0);
+}
+
+#root main button:not(.dept-delete-btn):focus-visible,
+#root .login-form > button[type="submit"]:focus-visible,
+#root .ui-modal-backdrop button:focus-visible,
+#root .fixed.inset-0 button:focus-visible {
+  outline: 2px solid #64748b !important;
+  outline-offset: 2px !important;
+}
+
+#root main button:not(.dept-delete-btn):disabled,
+#root .login-form > button[type="submit"]:disabled,
+#root .ui-modal-backdrop button:disabled,
+#root .fixed.inset-0 button:disabled {
+  color: #94a3b8 !important;
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  cursor: not-allowed !important;
+}
+
+/* Compact action bars shared by admin, accounting, HR, IT and employee views. */
+.app-action-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.salary-grid-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  flex: 0 0 1px;
+  background: #e2e8f0;
+}
+
+.salary-grid-toolbar-actions {
+  display: flex;
+  flex: 1 1 520px;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+#root main .salary-grid-toolbar-actions > .app-action-button {
+  min-height: 32px !important;
+  padding: 5px 10px !important;
+  font-size: 11px !important;
+}
+
+#root main button.app-action-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+}
+
+#root main button.app-action-icon-button svg {
+  display: block;
+}
+
+.app-action-toolbar > input,
+.app-action-toolbar > select,
+.app-action-toolbar > label input,
+.app-action-toolbar > label select {
+  width: auto !important;
+  min-width: 150px;
+  min-height: 36px;
+  margin-top: 0 !important;
+  padding: 7px 11px !important;
+  border-radius: 10px !important;
+}
+
+#root main .app-action-toolbar > button,
+#root main button.app-action-button {
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 36px !important;
+  margin-top: 0 !important;
+  padding: 7px 13px !important;
+  white-space: nowrap;
+}
+
+#root main button.app-action-button--danger {
+  color: #b42318 !important;
+  background: #fff7f6 !important;
+  border-color: #fecaca !important;
+}
+
+#root main button.app-action-button--danger:hover:not(:disabled) {
+  color: #991b1b !important;
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+}
+
+.app-segmented-tabs {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  margin-top: 20px;
+  overflow-x: auto;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 4px;
+  gap: 4px;
+}
+
+#root main .app-segmented-tabs > button {
+  width: auto !important;
+  min-width: 170px;
+  min-height: 36px !important;
+  margin: 0 !important;
+  padding: 7px 14px !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root main .app-segmented-tabs > button[aria-selected="true"] {
+  color: #123e6b !important;
+  background: #fff !important;
+  border-color: #bfd0e2 !important;
+  box-shadow: 0 4px 12px -9px rgb(15 23 42 / 60%) !important;
+}
+
+.it-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .app-action-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  #root main .app-action-toolbar > button {
+    width: 100% !important;
+    white-space: normal;
+  }
+
+  .app-action-toolbar > input,
+  .app-action-toolbar > select,
+  .app-action-toolbar > label input,
+  .app-action-toolbar > label select {
+    width: 100% !important;
+    min-width: 0;
+  }
+
+  .app-segmented-tabs {
+    width: 100%;
+  }
+
+  #root main .app-segmented-tabs > button {
+    min-width: 150px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .salary-grid-toolbar-divider {
+    display: none;
+  }
+
+  .salary-grid-toolbar-actions {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #root main button,
+  #root .ui-modal-backdrop button,
+  #root .fixed.inset-0 button,
+  .role-metric-card {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+
+  #root main button:hover,
+  #root .ui-modal-backdrop button:hover,
+  #root .fixed.inset-0 button:hover,
+  .role-metric-card:hover {
+    transform: none !important;
+  }
+}
+
+/* Role dashboards and personal self-service share the same compact visual
+   language. These styles are presentation-only and do not affect payroll,
+   attendance or bonus calculations. */
+.role-portal-stack {
+  display: grid;
+  gap: 20px;
+}
+
+.role-portal-intro {
+  padding: 2px 2px 0;
+}
+
+.role-portal-intro h2 {
+  color: #0f172a;
+  font-size: clamp(20px, 2vw, 26px);
+  letter-spacing: -0.025em;
+}
+
+.role-portal-intro p {
+  margin: 6px 0 0 !important;
+  line-height: 1.55;
+}
+
+.role-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.role-metric-card {
+  position: relative;
+  overflow: hidden;
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+
+.role-metric-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, #38bdf8, #2563eb);
+  content: '';
+  opacity: .72;
+}
+
+.role-metric-card:hover {
+  border-color: #c5d7eb !important;
+  box-shadow: 0 18px 38px -30px rgb(15 23 42 / 52%) !important;
+  transform: translateY(-2px);
+}
+
+.personal-account-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.personal-account-form {
+  border-color: #d9e5f1 !important;
+}
+
+.personal-account-form > div:not(.personal-account-actions) {
+  padding-bottom: 18px;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.personal-account-form > div:nth-last-child(2) {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.personal-account-form label {
+  display: grid;
+  gap: 7px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/*
+ * Form alignment baseline
+ *
+ * Every text field in a group is a two-row unit: label first, control second.
+ * This prevents a grid from stretching a label or letting a long label share
+ * the same line as the next field (the issue visible in the account card).
+ */
+.personal-account-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items: start;
+  gap: 14px 12px;
+}
+
+.personal-account-field-grid--readonly {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+#root main .personal-account-form .personal-account-field-grid > label {
+  align-self: start;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  gap: 7px !important;
+  min-width: 0;
+  margin: 0 !important;
+  line-height: 1.35;
+}
+
+#root main .personal-account-form .personal-account-field-grid > label > input {
+  box-sizing: border-box;
+  display: block;
+  margin: 0 !important;
+  width: 100%;
+}
+
+/* Shared safety net for the remaining standard forms in cards/modals.
+   Upload and checkbox labels are deliberately excluded: they are inline
+   controls rather than a label + text-input field. */
+#root main :is(.panel, .card, .modal-card) label:not(.sl-file-label, .sl-custom-upload-btn, .custom-checkbox-label, .time-off-travel-policy):has(> :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]), select, textarea)) {
+  align-self: start;
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: flex-start;
+  line-height: 1.35;
+  margin-top: 0;
+  min-width: 0;
+}
+
+#root main :is(.panel, .card, .modal-card) label:not(.sl-file-label, .sl-custom-upload-btn, .custom-checkbox-label, .time-off-travel-policy):has(> :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]), select, textarea)) > :is(input, select, textarea) {
+  box-sizing: border-box;
+  margin-top: 0 !important;
+  width: 100%;
+}
+
+.personal-account-form input {
+  min-height: 44px;
+  margin-top: 0 !important;
+  border-radius: 12px !important;
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+
+.personal-account-form input:focus {
+  border-color: #60a5fa !important;
+  outline: 0;
+  box-shadow: 0 0 0 4px rgb(59 130 246 / 12%) !important;
+}
+
+.personal-account-form input[readonly] {
+  color: #475569;
+  background: #f4f7fb !important;
+  border-color: #e2e8f0;
+}
+
+.personal-account-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 !important;
+  border: 0 !important;
+}
+
+.portal-action-button {
+  width: auto !important;
+  min-width: 160px;
+}
+
+/* Audit/history comparison columns: shared by the attendance audit view and
+   the read-only IT system journal. */
+th.audit-column-before,
+th.audit-column-after {
+  min-width: 82px;
+  padding: 12px 16px;
+  text-align: center;
+  font-weight: 800;
+}
+
+th.audit-column-before {
+  color: #b42318;
+  background: #fff1f0 !important;
+  border-bottom-color: #fecaca !important;
+}
+
+th.audit-column-after {
+  color: #067647;
+  background: #ecfdf3 !important;
+  border-bottom-color: #a7f3d0 !important;
+}
+
+td.audit-cell-before,
+td.audit-cell-after {
+  text-align: center;
+}
+
+.audit-value {
+  display: inline-flex;
+  min-width: 34px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.audit-value-before {
+  color: #b42318;
+  background: #fff1f0;
+  border-color: #fecaca;
+}
+
+.audit-value-after {
+  color: #067647;
+  background: #ecfdf3;
+  border-color: #a7f3d0;
+}
+
+@media (max-width: 640px) {
+  .role-metric-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .portal-action-button {
+    width: 100% !important;
+  }
+}
+
+/* Employee directory: keep the identifying columns in view while the
+   compensation/detail columns are scrolled horizontally. */
+.employee-directory-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.employee-directory-sticky {
+  position: sticky;
+  background: #fff;
+  z-index: 4;
+}
+
+.employee-directory-table thead .employee-directory-sticky {
+  background: #f8fafc;
+  z-index: 24;
+}
+
+.employee-directory-table tbody tr:hover .employee-directory-sticky {
+  background: rgb(248 250 252 / 0.8);
+}
+
+.employee-directory-sticky-1 {
+  left: 0;
+  width: 190px;
+  min-width: 190px;
+}
+
+.employee-directory-sticky-2 {
+  left: 190px;
+  width: 240px;
+  min-width: 240px;
+}
+
+.employee-directory-sticky-3 {
+  left: 430px;
+  width: 180px;
+  min-width: 180px;
+}
+
+.employee-directory-sticky-4 {
+  left: 610px;
+  width: 220px;
+  min-width: 220px;
+  box-shadow: 8px 0 12px -12px rgb(15 23 42 / 45%);
+}
+
+/* --------------------------------------------------------------------------
+   OTHER-INCOME EVIDENCE DIALOG
+   Rendered through a portal so legacy .panel > div rules cannot collapse it.
+   -------------------------------------------------------------------------- */
+.other-income-evidence-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 200 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  overflow: auto !important;
+  padding: 20px !important;
+  background: rgb(15 23 42 / 6%) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.other-income-evidence-modal {
+  display: flex !important;
+  flex-direction: column !important;
+  width: min(760px, calc(100vw - 40px)) !important;
+  max-width: 760px !important;
+  max-height: calc(100vh - 40px) !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid #dbe3ec !important;
+  border-radius: 22px !important;
+  background: #fff !important;
+  box-shadow: 0 28px 80px -28px rgb(15 23 42 / 68%) !important;
+}
+
+.other-income-evidence-modal__header {
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 20px !important;
+  flex: 0 0 auto !important;
+  padding: 22px 24px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: linear-gradient(180deg, #fff 0%, #fbfdff 100%) !important;
+}
+
+.other-income-evidence-modal__heading {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+}
+
+.other-income-evidence-modal__heading p,
+.other-income-evidence-modal__heading h3 {
+  max-width: 100% !important;
+  overflow-wrap: anywhere;
+}
+
+.other-income-evidence-modal__close {
+  display: grid !important;
+  place-items: center !important;
+  flex: 0 0 38px !important;
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
+  min-height: 38px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 999px !important;
+  color: #334155 !important;
+  background: #f8fafc !important;
+  font-size: 22px !important;
+  line-height: 1 !important;
+  cursor: pointer;
+}
+
+.other-income-evidence-modal__close:hover {
+  background: #e2e8f0 !important;
+}
+
+/* Nút đóng thống nhất: đỏ, dễ nhận biết và không phụ thuộc ảnh bitmap. */
+button.app-close-button,
+.app-close-button {
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid #b91c1c !important;
+  border-radius: 50% !important;
+  background: radial-gradient(circle at 30% 26%, #fb7185 0%, #ef4444 39%, #dc2626 68%, #b91c1c 100%) !important;
+  color: #ffffff !important;
+  font-family: Arial, sans-serif !important;
+  font-size: 22px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  text-align: center !important;
+  cursor: pointer !important;
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 45%), 0 5px 12px rgb(185 28 28 / 28%) !important;
+  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease !important;
+}
+
+button.app-close-button:hover:not(:disabled),
+.app-close-button:hover:not(:disabled) {
+  filter: brightness(1.06) saturate(1.08) !important;
+  transform: translateY(-1px) scale(1.06) !important;
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 52%), 0 8px 16px rgb(185 28 28 / 34%) !important;
+}
+
+button.app-close-button:active:not(:disabled),
+.app-close-button:active:not(:disabled) {
+  transform: translateY(0) scale(.94) !important;
+  box-shadow: inset 0 2px 5px rgb(127 29 29 / 30%), 0 2px 5px rgb(185 28 28 / 22%) !important;
+}
+
+button.app-close-button:focus-visible,
+.app-close-button:focus-visible {
+  outline: 3px solid rgb(248 113 113 / 42%) !important;
+  outline-offset: 3px !important;
+}
+
+button.app-close-button:disabled,
+.app-close-button:disabled {
+  cursor: not-allowed !important;
+  filter: grayscale(.35) !important;
+  opacity: .48 !important;
+}
+
+button.app-close-button svg,
+.app-close-button svg {
+  width: 18px !important;
+  height: 18px !important;
+  flex: 0 0 auto !important;
+}
+
+button.app-close-button--compact,
+.app-close-button--compact {
+  width: 26px !important;
+  min-width: 26px !important;
+  height: 26px !important;
+  min-height: 26px !important;
+  font-size: 17px !important;
+}
+
+button.department-modal-icon-button.app-close-button,
+#root main .panel button.department-modal-icon-button.app-close-button {
+  border-color: #b91c1c !important;
+  border-radius: 50% !important;
+  background: radial-gradient(circle at 30% 26%, #fb7185 0%, #ef4444 39%, #dc2626 68%, #b91c1c 100%) !important;
+  color: #ffffff !important;
+}
+
+/* The global action-button system uses ID selectors. Match that specificity so
+   close controls are never reset to the neutral grey button appearance. */
+#root main button.app-close-button,
+#root .ui-modal-backdrop button.app-close-button,
+#root .fixed.inset-0 button.app-close-button {
+  border: 1px solid #b91c1c !important;
+  border-radius: 50% !important;
+  background-color: #dc2626 !important;
+  background-image: radial-gradient(circle at 30% 26%, #fb7185 0%, #ef4444 39%, #dc2626 68%, #b91c1c 100%) !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+}
+
+#root main button.app-close-button:hover:not(:disabled),
+#root .ui-modal-backdrop button.app-close-button:hover:not(:disabled),
+#root .fixed.inset-0 button.app-close-button:hover:not(:disabled) {
+  border-color: #991b1b !important;
+  background-color: #dc2626 !important;
+  background-image: radial-gradient(circle at 30% 26%, #fb7185 0%, #ef4444 39%, #dc2626 68%, #991b1b 100%) !important;
+  color: #ffffff !important;
+}
+
+#root main button.app-close-button:active:not(:disabled),
+#root .ui-modal-backdrop button.app-close-button:active:not(:disabled),
+#root .fixed.inset-0 button.app-close-button:active:not(:disabled) {
+  background-color: #b91c1c !important;
+  background-image: radial-gradient(circle at 30% 26%, #ef4444 0%, #dc2626 55%, #991b1b 100%) !important;
+}
+
+#root main button.app-close-button:focus-visible,
+#root .ui-modal-backdrop button.app-close-button:focus-visible,
+#root .fixed.inset-0 button.app-close-button:focus-visible {
+  outline: 3px solid rgb(248 113 113 / 42%) !important;
+  outline-offset: 3px !important;
+}
+
+.other-income-evidence-modal__body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  scrollbar-gutter: stable;
+}
+
+.other-income-evidence-modal__footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex: 0 0 auto !important;
+  flex-wrap: wrap !important;
+  gap: 12px !important;
+  padding: 16px 24px !important;
+  border-top: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+}
+
+@media (max-width: 640px) {
+  .other-income-evidence-backdrop {
+    align-items: flex-end !important;
+    padding: 10px !important;
+  }
+
+  .other-income-evidence-modal {
+    width: 100% !important;
+    max-height: calc(100vh - 20px) !important;
+    border-radius: 18px !important;
+  }
+
+  .other-income-evidence-modal__header,
+  .other-income-evidence-modal__body,
+  .other-income-evidence-modal__footer {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .other-income-evidence-modal__footer,
+  .other-income-evidence-modal__footer > div {
+    width: 100% !important;
+  }
+
+  .other-income-evidence-modal__footer > div:last-child {
+    justify-content: flex-end !important;
+  }
+}
+
+/* One transparent backdrop for every dialog in the portal. Keep this final
+   so feature-specific styles cannot turn a popup into an opaque page or blur
+   the application underneath it. */
+.app-modal-overlay,
+.ui-modal-backdrop,
+.modal-backdrop,
+.department-modal-backdrop,
+.other-income-evidence-backdrop {
+  background-color: rgb(15 23 42 / 4%) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Compact shared controls for dashboard, attendance and exports. */
+.dashboard-overview-grid,
+.export-page-grid {
+  align-items: start;
+  grid-auto-rows: min-content;
+}
+
+.dashboard-overview-grid > .card,
+.export-page-grid > .card {
+  min-height: 0 !important;
+  height: auto !important;
+  align-self: start;
+}
+
+.dashboard-kpi-filter,
+.dashboard-symbol-summary,
+.export-form-card,
+.export-note-card {
+  padding-bottom: 16px !important;
+}
+
+.dashboard-kpi-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  margin: 8px 0 10px;
+}
+
+.dashboard-kpi-actions .dashboard-kpi-action,
+.holiday-toolbar-control {
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: auto !important;
+  min-width: 142px;
+  height: 34px !important;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 9px !important;
+  background: #f8fafc !important;
+  color: #172033 !important;
+  font-family: Roboto, Arial, sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%) !important;
+  transition: background-color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease !important;
+}
+
+.dashboard-kpi-actions .dashboard-kpi-action:hover:not(:disabled),
+.holiday-toolbar-control:hover:not(:disabled) {
+  background: #fff !important;
+  border-color: #94a3b8 !important;
+  box-shadow: 0 3px 8px rgb(15 23 42 / 12%) !important;
+  transform: translateY(-1px);
+}
+
+.dashboard-kpi-actions .dashboard-kpi-action:active:not(:disabled),
+.dashboard-actions .dashboard-kpi-action:active:not(:disabled),
+.holiday-toolbar-control:active:not(:disabled) {
+  box-shadow: none !important;
+  transform: translateY(0) scale(.97);
+}
+
+.dashboard-kpi-actions .dashboard-kpi-action:focus-visible,
+.holiday-toolbar-control:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.holiday-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.holiday-toolbar-actions select.holiday-toolbar-control {
+  min-width: 112px;
+  appearance: auto;
+}
+
+.dashboard-symbol-summary .kpi-symbols {
+  margin-top: 10px !important;
+}
+
+.dashboard-kpi-panel.kpi-grid {
+  grid-template-columns: repeat(auto-fit, minmax(144px, 1fr)) !important;
+  gap: 8px !important;
+  margin-top: 0 !important;
+}
+
+.dashboard-kpi-panel .kpi-card {
+  min-height: 0 !important;
+  padding: 10px 12px !important;
+  border-radius: 11px !important;
+  box-shadow: none !important;
+}
+
+.dashboard-kpi-panel .kpi-card:nth-child(3n + 1) {
+  background: #f8fafc !important;
+  border-color: #dbe4ee !important;
+}
+
+.dashboard-kpi-panel .kpi-card:nth-child(3n + 2) {
+  background: #f7fafc !important;
+  border-color: #d7e2ec !important;
+}
+
+.dashboard-kpi-panel .kpi-card:nth-child(3n) {
+  background: #f8f9fb !important;
+  border-color: #e1e6ee !important;
+}
+
+.dashboard-kpi-panel .kpi-card h3 {
+  margin: 0 0 5px !important;
+  font-size: 11px !important;
+  letter-spacing: .03em !important;
+  line-height: 1.25 !important;
+}
+
+.dashboard-kpi-panel .kpi-card p {
+  margin: 0 !important;
+  font-size: 26px !important;
+  line-height: 1.1 !important;
+}
+
+.inline-actions.override-history-actions {
+  grid-template-columns: minmax(210px, 1fr) 112px 38px !important;
+  gap: 8px !important;
+  align-items: end !important;
+}
+
+.inline-actions.override-history-actions > label {
+  min-width: 0 !important;
+}
+
+.inline-actions.override-history-actions > label:first-child {
+  max-width: 440px !important;
+}
+
+.inline-actions.override-history-actions .history-download-button {
+  width: 38px !important;
+  min-width: 38px !important;
+  height: 38px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px !important;
+  color: #334155 !important;
+  background: #f8fafc !important;
+}
+
+.history-download-button svg,
+.icon-only-control svg,
+.salary-confirm-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-only-control {
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 9px !important;
+  background: #f8fafc !important;
+  color: #475569 !important;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+.icon-only-control:hover:not(:disabled),
+.icon-only-control.is-active {
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  border-color: #93c5fd !important;
+}
+
+.icon-only-control:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.salary-confirm-button {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.salary-confirm-button .salary-confirm-icon {
+  display: inline-flex;
+  color: currentColor;
+}
+
+.salary-confirm-button.is-confirmed {
+  background: #64748b !important;
+}
+
+@media (max-width: 760px) {
+  .dashboard-kpi-actions .dashboard-kpi-action,
+  .holiday-toolbar-control {
+    min-width: 0;
+  }
+
+  .inline-actions.override-history-actions {
+    grid-template-columns: minmax(0, 1fr) 96px 38px !important;
+  }
+
+  .inline-actions.override-history-actions > label:first-child {
+    max-width: none !important;
+  }
+}

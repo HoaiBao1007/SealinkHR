@@ -1,0 +1,415 @@
+/*
+ * Bố cục thẻ nhân viên trong sơ đồ tổ chức.
+ * File này được tách riêng để tránh các selector điều hướng Setting tác động
+ * đến quan hệ cha-con và làm nội dung thẻ bị dàn thành nhiều cột.
+ */
+
+:is(
+  .organization-chart,
+  .organization-chart-canvas,
+  .organization-chart-stage,
+  .organization-chart-viewport,
+  .organization-map,
+  .org-chart,
+  .org-chart-canvas,
+  .department-org-chart,
+  .org-tree,
+  .org-mobile-unit,
+  .org-mobile-unit__heading,
+  .org-mobile-unit__body,
+  .org-mobile-member,
+  .org-mobile-member__english,
+  .org-mobile-member__vietnamese,
+  .org-mobile-member__position,
+  .org-chart-state,
+  .org-chart-state--error,
+  .org-chart-shell,
+  .org-chart-toolbar,
+  .org-chart-toolbar__summary,
+  .org-chart-eyebrow,
+  .org-chart-search,
+  .org-chart-actions,
+  .org-chart-zoom,
+  .org-chart-action-button,
+  .org-chart-action-button--fit,
+  .org-chart-inline-error,
+  .org-chart-viewport,
+  .org-chart-scaled-area,
+  .org-chart-stage,
+  .org-chart-stage__brand,
+  .org-chart-stage__title,
+  .org-chart-connectors,
+  .org-chart-root,
+  .org-chart-unit,
+  .org-chart-member__identity,
+  .org-chart-member__position,
+  .org-chart-member__department,
+  .org-chart-member__contact,
+  .org-chart-mobile,
+  [data-organization-chart],
+  [class*="organization-chart"],
+  [class*="org-chart"]
+) :is(
+  .employee-card,
+  .employee-node,
+  .org-employee-card,
+  .org-person-card,
+  .org-chart-person,
+  .person-card,
+  .person-node,
+  .member-card,
+  .staff-card,
+  [class*="employee-card"],
+  [class*="employee-node"],
+  [class*="person-card"],
+  [class*="person-node"],
+  [class*="member-card"],
+  [class*="staff-card"]
+) {
+  min-width: 0;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+}
+
+:is(
+  .organization-chart,
+  .organization-chart-canvas,
+  .organization-chart-stage,
+  .organization-chart-viewport,
+  .organization-map,
+  .org-chart,
+  .org-chart-canvas,
+  .department-org-chart,
+  .org-tree,
+  .org-mobile-unit,
+  .org-mobile-unit__heading,
+  .org-mobile-unit__body,
+  .org-mobile-member,
+  .org-mobile-member__english,
+  .org-mobile-member__vietnamese,
+  .org-mobile-member__position,
+  .org-chart-state,
+  .org-chart-state--error,
+  .org-chart-shell,
+  .org-chart-toolbar,
+  .org-chart-toolbar__summary,
+  .org-chart-eyebrow,
+  .org-chart-search,
+  .org-chart-actions,
+  .org-chart-zoom,
+  .org-chart-action-button,
+  .org-chart-action-button--fit,
+  .org-chart-inline-error,
+  .org-chart-viewport,
+  .org-chart-scaled-area,
+  .org-chart-stage,
+  .org-chart-stage__brand,
+  .org-chart-stage__title,
+  .org-chart-connectors,
+  .org-chart-root,
+  .org-chart-unit,
+  .org-chart-member__identity,
+  .org-chart-member__position,
+  .org-chart-member__department,
+  .org-chart-member__contact,
+  .org-chart-mobile,
+  [data-organization-chart],
+  [class*="organization-chart"],
+  [class*="org-chart"]
+) :is(
+  .employee-card,
+  .employee-node,
+  .org-employee-card,
+  .org-person-card,
+  .org-chart-person,
+  .person-card,
+  .person-node,
+  .member-card,
+  .staff-card,
+  [class*="employee-card"],
+  [class*="employee-node"],
+  [class*="person-card"],
+  [class*="person-node"],
+  [class*="member-card"],
+  [class*="staff-card"]
+) :is(
+  .employee-card__content,
+  .employee-card__body,
+  .employee-card__info,
+  .employee-info,
+  .employee-details,
+  .person-card__content,
+  .person-info,
+  .person-details,
+  .member-info,
+  .member-details,
+  .org-person-info,
+  .org-person-details,
+  .org-chart-member__identity,
+  .org-chart-member__contact,
+  [class*="employee-info"],
+  [class*="employee-detail"],
+  [class*="person-info"],
+  [class*="person-detail"],
+  [class*="member-info"],
+  [class*="member-detail"]
+) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+}
+
+:is(
+  .organization-chart,
+  .organization-chart-canvas,
+  .organization-chart-stage,
+  .organization-chart-viewport,
+  .organization-map,
+  .org-chart,
+  .org-chart-canvas,
+  .department-org-chart,
+  .org-tree,
+  .org-mobile-unit,
+  .org-mobile-unit__heading,
+  .org-mobile-unit__body,
+  .org-mobile-member,
+  .org-mobile-member__english,
+  .org-mobile-member__vietnamese,
+  .org-mobile-member__position,
+  .org-chart-state,
+  .org-chart-state--error,
+  .org-chart-shell,
+  .org-chart-toolbar,
+  .org-chart-toolbar__summary,
+  .org-chart-eyebrow,
+  .org-chart-search,
+  .org-chart-actions,
+  .org-chart-zoom,
+  .org-chart-action-button,
+  .org-chart-action-button--fit,
+  .org-chart-inline-error,
+  .org-chart-viewport,
+  .org-chart-scaled-area,
+  .org-chart-stage,
+  .org-chart-stage__brand,
+  .org-chart-stage__title,
+  .org-chart-connectors,
+  .org-chart-root,
+  .org-chart-unit,
+  .org-chart-member__identity,
+  .org-chart-member__position,
+  .org-chart-member__department,
+  .org-chart-member__contact,
+  .org-chart-mobile,
+  [data-organization-chart],
+  [class*="organization-chart"],
+  [class*="org-chart"]
+) :is(
+  .employee-card,
+  .employee-node,
+  .org-employee-card,
+  .org-person-card,
+  .org-chart-person,
+  .person-card,
+  .person-node,
+  .member-card,
+  .staff-card,
+  [class*="employee-card"],
+  [class*="employee-node"],
+  [class*="person-card"],
+  [class*="person-node"],
+  [class*="member-card"],
+  [class*="staff-card"]
+) :is(
+  .employee-card__content,
+  .employee-card__body,
+  .employee-card__info,
+  .employee-info,
+  .employee-details,
+  .person-card__content,
+  .person-info,
+  .person-details,
+  .member-info,
+  .member-details,
+  .org-person-info,
+  .org-person-details,
+  .org-chart-member__identity,
+  .org-chart-member__contact,
+  [class*="employee-info"],
+  [class*="employee-detail"],
+  [class*="person-info"],
+  [class*="person-detail"],
+  [class*="member-info"],
+  [class*="member-detail"]
+) > * {
+  display: block !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+
+/* Các dòng thông tin phải xếp dọc, nhưng nhãn và giá trị trên cùng một hàng. */
+:is(
+  .organization-chart,
+  .organization-chart-canvas,
+  .organization-chart-stage,
+  .organization-chart-viewport,
+  .organization-map,
+  .org-chart,
+  .org-chart-canvas,
+  .department-org-chart,
+  .org-tree,
+  .org-mobile-unit,
+  .org-mobile-unit__heading,
+  .org-mobile-unit__body,
+  .org-mobile-member,
+  .org-mobile-member__english,
+  .org-mobile-member__vietnamese,
+  .org-mobile-member__position,
+  .org-chart-state,
+  .org-chart-state--error,
+  .org-chart-shell,
+  .org-chart-toolbar,
+  .org-chart-toolbar__summary,
+  .org-chart-eyebrow,
+  .org-chart-search,
+  .org-chart-actions,
+  .org-chart-zoom,
+  .org-chart-action-button,
+  .org-chart-action-button--fit,
+  .org-chart-inline-error,
+  .org-chart-viewport,
+  .org-chart-scaled-area,
+  .org-chart-stage,
+  .org-chart-stage__brand,
+  .org-chart-stage__title,
+  .org-chart-connectors,
+  .org-chart-root,
+  .org-chart-unit,
+  .org-chart-member__identity,
+  .org-chart-member__position,
+  .org-chart-member__department,
+  .org-chart-member__contact,
+  .org-chart-mobile,
+  [data-organization-chart],
+  [class*="organization-chart"],
+  [class*="org-chart"]
+) :is(
+  .employee-card,
+  .employee-node,
+  .org-employee-card,
+  .org-person-card,
+  .org-chart-person,
+  .person-card,
+  .person-node,
+  .member-card,
+  .staff-card,
+  [class*="employee-card"],
+  [class*="employee-node"],
+  [class*="person-card"],
+  [class*="person-node"],
+  [class*="member-card"],
+  [class*="staff-card"]
+) :is(
+  [class*="field"],
+  [class*="row"],
+  [class*="line"],
+  [class*="contact"]
+) {
+  display: flex !important;
+  flex-flow: row wrap !important;
+  align-items: baseline !important;
+  gap: 4px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  writing-mode: horizontal-tb !important;
+}
+
+:is(
+  .organization-chart,
+  .organization-chart-canvas,
+  .organization-chart-stage,
+  .organization-chart-viewport,
+  .organization-map,
+  .org-chart,
+  .org-chart-canvas,
+  .department-org-chart,
+  .org-tree,
+  .org-mobile-unit,
+  .org-mobile-unit__heading,
+  .org-mobile-unit__body,
+  .org-mobile-member,
+  .org-mobile-member__english,
+  .org-mobile-member__vietnamese,
+  .org-mobile-member__position,
+  .org-chart-state,
+  .org-chart-state--error,
+  .org-chart-shell,
+  .org-chart-toolbar,
+  .org-chart-toolbar__summary,
+  .org-chart-eyebrow,
+  .org-chart-search,
+  .org-chart-actions,
+  .org-chart-zoom,
+  .org-chart-action-button,
+  .org-chart-action-button--fit,
+  .org-chart-inline-error,
+  .org-chart-viewport,
+  .org-chart-scaled-area,
+  .org-chart-stage,
+  .org-chart-stage__brand,
+  .org-chart-stage__title,
+  .org-chart-connectors,
+  .org-chart-root,
+  .org-chart-unit,
+  .org-chart-member__identity,
+  .org-chart-member__position,
+  .org-chart-member__department,
+  .org-chart-member__contact,
+  .org-chart-mobile,
+  [data-organization-chart],
+  [class*="organization-chart"],
+  [class*="org-chart"]
+) :is(
+  .employee-card,
+  .employee-node,
+  .org-employee-card,
+  .org-person-card,
+  .org-chart-person,
+  .person-card,
+  .person-node,
+  .member-card,
+  .staff-card,
+  [class*="employee-card"],
+  [class*="employee-node"],
+  [class*="person-card"],
+  [class*="person-node"],
+  [class*="member-card"],
+  [class*="staff-card"]
+) :is(
+  [class*="name"],
+  [class*="title"],
+  [class*="role"],
+  [class*="department"],
+  [class*="email"],
+  [class*="phone"]
+) {
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+

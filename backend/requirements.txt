@@ -1,0 +1,19 @@
+# Core API and data processing dependencies.
+# This project supports SQLite for local development and MariaDB/MySQL in production.
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+pandas==2.2.3
+openpyxl==3.1.5
+xlrd==2.0.1
+python-multipart==0.0.20
+SQLAlchemy==2.0.40
+alembic==1.15.2
+pydantic-settings==2.8.1
+PyMySQL==1.1.1
+cryptography==43.0.3
+reportlab==4.4.10
+Pillow==12.3.0
+
+# Test dependencies.
+pytest==8.3.5
+httpx==0.28.1

@@ -1,0 +1,4 @@
+Alembic migration folder for SEALINK attendance system.
+- env.py: migration environment
+- script.py.mako: migration template
+- Use `alembic revision --autogenerate -m "init"` then `alembic upgrade head` to create DB schema.

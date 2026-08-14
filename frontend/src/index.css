@@ -1,0 +1,136 @@
+@layer theme, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+:root {
+  --ink: #374151; /* Charcoal */
+  --ink-soft: #4b5563;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --brand: #163b66;
+  --brand-strong: #102b49;
+  --brand-soft: #eaf2fb;
+  --font-sans: 'Roboto', Arial, sans-serif;
+  --font-mono: 'Roboto', Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Hide scrollbar for sidebar inner container */
+.sl-sidebar-inner::-webkit-scrollbar {
+  display: none;
+}
+
+
+h1 {
+  margin: 0;
+  font-size: clamp(28px, 4.3vw, 44px);
+  line-height: 1.08;  
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: 19px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: #dbeafe;
+  color: #0f172a;
+}
+
+code {
+  font-family: var(--font-sans);
+}
+
+.ui-button,
+.ui-input {
+  min-height: 36px;
+  border-radius: 10px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ui-button { width: auto; border: 1px solid transparent; padding: 0 14px; cursor: pointer; box-shadow: 0 4px 12px -10px rgb(15 23 42 / 55%); transition: background-color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.ui-button:hover:not(:disabled) { border-color: #7f9bb8; box-shadow: 0 10px 22px -14px rgb(15 23 42 / 66%); transform: translateY(-2px); }
+.ui-button:active:not(:disabled) { transform: translateY(0); }
+.ui-button:focus-visible, .ui-input:focus-visible { outline: 2px solid #1e91ca; outline-offset: 2px; }
+.ui-button-primary { color: #fff; background: #1d4f82; }
+.ui-button-primary:hover { background: #163b66; }
+.ui-button-secondary { color: #334155; background: #fff; border-color: #cbd5e1; }
+.ui-button-secondary:hover { background: #f8fafc; }
+.ui-button-danger { color: #fff; background: #dc2626; }
+.ui-button-danger:hover { background: #b91c1c; }
+.ui-input { width: 100%; padding: 0 12px; color: #1e293b; background: #fff; border: 1px solid #cbd5e1; }
+.ui-card { padding: 20px; background: linear-gradient(180deg, #fff 0%, #fbfdff 100%); border: 1px solid #dbe5f0; border-radius: 18px; box-shadow: 0 14px 32px -28px rgb(15 23 42 / 45%); }
+.ui-table-wrap { width: 100%; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 14px; }
+.ui-table { width: 100%; border-collapse: collapse; background: #fff; }
+.ui-table th, .ui-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+.ui-table th { color: #475569; background: #f8fafc; font-size: 12px; font-weight: 700; }
+.ui-state { padding: 28px 20px; color: #64748b; text-align: center; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px; }
+.ui-state-error { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+.ui-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  /* Keep the current page recognizable while the dialog has focus. */
+  background: rgb(15 23 42 / 6%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Every portalled dialog uses the same light, transparent overlay. The page
+   remains visible and recognizable while interaction stays modal. */
+.app-modal-overlay {
+  background: rgb(15 23 42 / 6%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.ui-confirm-dialog { width: min(100%, 460px); padding: 24px; background: #fff; border-radius: 12px; box-shadow: 0 20px 40px rgb(15 23 42 / 24%); }
+.ui-confirm-dialog h2 { margin: 0; color: #0f172a; font-size: 20px; }
+.ui-confirm-dialog p { margin: 12px 0 0; color: #475569; line-height: 1.55; white-space: pre-line; }
+.ui-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+
+@media (max-width: 640px) {
+  .ui-card { padding: 16px; }
+  .ui-dialog-actions { flex-direction: column-reverse; }
+  .ui-dialog-actions .ui-button { width: 100%; }
+}

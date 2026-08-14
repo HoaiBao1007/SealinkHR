@@ -1,0 +1,61 @@
+/* Compact audit-history controls: keep the filter, limit and download action together. */
+.history-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.history-actions > .override-history-filter {
+  flex: 0 1 440px;
+  width: min(440px, 100%);
+  min-width: 240px;
+}
+
+.history-actions > .override-history-filter input {
+  width: 100%;
+}
+
+.history-actions > label:not(.override-history-filter) {
+  flex: 0 0 96px;
+  width: 96px;
+}
+
+.history-actions > label:not(.override-history-filter) input {
+  width: 100%;
+}
+
+.history-actions > .history-download-button {
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 0;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.history-actions > .history-download-button::before {
+  content: "↓";
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.history-actions > .history-download-button:hover,
+.history-actions > .history-download-button:focus-visible {
+  transform: translateY(-1px);
+}
+
+@media (max-width: 720px) {
+  .history-actions > .override-history-filter {
+    flex-basis: 100%;
+    width: 100%;
+  }
+}

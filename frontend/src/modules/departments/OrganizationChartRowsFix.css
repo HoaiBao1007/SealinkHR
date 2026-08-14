@@ -1,0 +1,161 @@
+/*
+ * Organization chart layout guard.
+ *
+ * The admin navigation can be nested under Settings, but that nesting must not
+ * change the layout of an employee node. Keep this reset scoped to the chart
+ * canvas so shared sidebar/card rules cannot turn employee fields into columns.
+ */
+:is(
+    .organization-chart,
+    .organization-chart-page,
+    .organization-map,
+    .org-chart,
+    .org-chart-canvas,
+    [class*="organization-chart"],
+    [class*="organization-map"],
+    [class*="org-chart"]
+  )
+  :is(
+    .employee-card,
+    .employee-node,
+    .employee-profile,
+    .person-card,
+    .person-node,
+    .chart-person,
+    .org-person,
+    .person-tile,
+    .employee-tile,
+    .staff-card,
+    .member-card,
+    [class*="employee-card"],
+    [class*="employee-node"],
+    [class*="employee-profile"],
+    [class*="person-card"],
+    [class*="person-node"],
+    [class*="chart-person"],
+    [class*="org-person"]
+  ) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-auto-flow: row !important;
+  min-width: 260px;
+  width: 100%;
+}
+
+:is(
+    .organization-chart,
+    .organization-chart-page,
+    .organization-map,
+    .org-chart,
+    .org-chart-canvas,
+    [class*="organization-chart"],
+    [class*="organization-map"],
+    [class*="org-chart"]
+  )
+  :is(
+    .employee-card,
+    .employee-node,
+    .employee-profile,
+    .person-card,
+    .person-node,
+    .chart-person,
+    .org-person,
+    .person-tile,
+    .employee-tile,
+    .staff-card,
+    .member-card,
+    [class*="employee-card"],
+    [class*="employee-node"],
+    [class*="employee-profile"],
+    [class*="person-card"],
+    [class*="person-node"],
+    [class*="chart-person"],
+    [class*="org-person"]
+  )
+  > :is(div, section, header, main, p, span, strong, small, ul, ol) {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+:is(
+    .organization-chart,
+    .organization-chart-page,
+    .organization-map,
+    .org-chart,
+    .org-chart-canvas,
+    [class*="organization-chart"],
+    [class*="organization-map"],
+    [class*="org-chart"]
+  )
+  :is(
+    .employee-card,
+    .employee-node,
+    .employee-profile,
+    .person-card,
+    .person-node,
+    .chart-person,
+    .org-person,
+    .person-tile,
+    .employee-tile,
+    .staff-card,
+    .member-card,
+    [class*="employee-card"],
+    [class*="employee-node"],
+    [class*="employee-profile"],
+    [class*="person-card"],
+    [class*="person-node"],
+    [class*="chart-person"],
+    [class*="org-person"]
+  )
+  :is(div, section, header, main, p, span, strong, small, li) {
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal !important;
+}
+
+:is(
+    .organization-chart,
+    .organization-chart-page,
+    .organization-map,
+    .org-chart,
+    .org-chart-canvas,
+    [class*="organization-chart"],
+    [class*="organization-map"],
+    [class*="org-chart"]
+  )
+  :is(
+    .employee-card,
+    .employee-node,
+    .employee-profile,
+    .person-card,
+    .person-node,
+    .chart-person,
+    .org-person,
+    .person-tile,
+    .employee-tile,
+    .staff-card,
+    .member-card,
+    [class*="employee-card"],
+    [class*="employee-node"],
+    [class*="employee-profile"],
+    [class*="person-card"],
+    [class*="person-node"],
+    [class*="chart-person"],
+    [class*="org-person"]
+  )
+  :is(ul, ol) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

@@ -1,0 +1,58 @@
+# Backend Python environment
+backend/.venv/
+backend/venv/
+backend/env/
+
+# Python cache and build artifacts
+backend/__pycache__/
+backend/**/*.py[cod]
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/htmlcov/
+backend/.hypothesis/
+backend/dist/
+backend/build/
+backend/*.egg-info/
+
+# Local settings and secrets
+backend/.env
+backend/.env.*
+!backend/.env.example
+# Ngoại lệ: .env.sqlite là file template mẫu, không chứa secret → giữ trong git
+!backend/.env.sqlite
+
+# Logs and temp files
+backend/*.log
+backend/tmp/
+backend/temp/
+*.tmp
+*.swp
+
+# SQLite database file — chứa dữ liệu thật, không push lên git
+# Copy file này khi di chuyển máy
+backend/*.db
+*.db
+
+# Sensitive employee documents and database backups must never be committed.
+backend/uploads/
+backups/
+
+# Temporary recovery and local investigation artefacts.
+frontend/App_recovered*.tsx
+frontend/App_recovered*.txt
+frontend/App_downloaded.js
+backend/scratch/
+
+# Editor, agent and generated QA artefacts. These are not application source.
+.vscode/
+.codex_*
+.tmp-*
+_dirs.png
+_tmp_*.png
+build-status.png
+diag-*.png
+output/
+tmp/
+docs/_qa/

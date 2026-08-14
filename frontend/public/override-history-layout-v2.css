@@ -1,0 +1,82 @@
+/* Compact toolbar for the attendance override history. */
+section.grid-two .card.full-width .inline-actions.history-actions {
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+}
+
+section.grid-two .card.full-width .inline-actions.history-actions > .override-history-filter {
+  flex: 0 1 440px !important;
+  width: min(440px, 100%) !important;
+  max-width: 440px !important;
+  min-width: 230px !important;
+  margin: 0 !important;
+}
+
+section.grid-two .card.full-width .inline-actions.history-actions > label:not(.override-history-filter) {
+  flex: 0 0 96px !important;
+  width: 96px !important;
+  margin: 0 !important;
+}
+
+section.grid-two .card.full-width .inline-actions.history-actions > label > input {
+  width: 100% !important;
+}
+
+section.grid-two .card.full-width .inline-actions.history-actions > button.history-download-button {
+  position: relative !important;
+  display: inline-flex !important;
+  flex: 0 0 40px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 1 !important;
+  text-indent: -9999px !important;
+}
+
+section.grid-two .card.full-width .inline-actions.history-actions > button.history-download-button > * {
+  display: none !important;
+}
+
+section.grid-two .card.full-width .inline-actions.history-actions > button.history-download-button::after {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #1f3f68;
+  content: "↓";
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  text-indent: 0;
+}
+
+section.grid-two .card.full-width .inline-actions.history-actions > button.history-download-button:hover,
+section.grid-two .card.full-width .inline-actions.history-actions > button.history-download-button:focus-visible {
+  border-color: #7a9fc8 !important;
+  background: #eaf3fd !important;
+  box-shadow: 0 4px 12px rgba(38, 90, 144, 0.16) !important;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 720px) {
+  section.grid-two .card.full-width .inline-actions.history-actions {
+    align-items: stretch !important;
+  }
+
+  section.grid-two .card.full-width .inline-actions.history-actions > .override-history-filter {
+    flex-basis: 100% !important;
+    max-width: none !important;
+  }
+}
