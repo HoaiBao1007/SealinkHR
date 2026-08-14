@@ -65,9 +65,10 @@ if ($FrontendPort -eq $BackendPort) {
 $backendPath = Join-Path $AppPath "backend"
 $backendEnv = Join-Path $backendPath ".env"
 $python = Join-Path $backendPath ".venv\Scripts\python.exe"
+$pythonVenvConfig = Join-Path $backendPath ".venv\pyvenv.cfg"
 $frontendDist = Join-Path $AppPath "frontend\dist"
 $runnerScript = Join-Path $AppPath "scripts\run_backend_task.ps1"
-foreach ($path in @($backendEnv, $SecretsFile, $python, (Join-Path $frontendDist "index.html"), $runnerScript)) {
+foreach ($path in @($backendEnv, $SecretsFile, $python, $pythonVenvConfig, (Join-Path $frontendDist "index.html"), $runnerScript)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Thieu hosting runtime file: $path"
     }
@@ -218,10 +219,22 @@ $action = New-ScheduledTaskAction `
     -Argument $taskArguments `
     -WorkingDirectory $backendPath
 $trigger = New-ScheduledTaskTrigger -AtStartup
-$taskPrincipal = New-ScheduledTaskPrincipal `
-    -UserId "SYSTEM" `
-    -LogonType ServiceAccount `
-    -RunLevel Highest
+$venvConfigContent = Get-Content -LiteralPath $pythonVenvConfig -Raw
+$usesMicrosoftStorePython = $venvConfigContent -match "(?i)\\WindowsApps\\"
+if ($usesMicrosoftStorePython) {
+    $taskUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    Write-Step "Python Microsoft Store: backend task chay bang $taskUser (S4U, khong luu mat khau)"
+    $taskPrincipal = New-ScheduledTaskPrincipal `
+        -UserId $taskUser `
+        -LogonType S4U `
+        -RunLevel Highest
+} else {
+    $taskUser = "SYSTEM"
+    $taskPrincipal = New-ScheduledTaskPrincipal `
+        -UserId $taskUser `
+        -LogonType ServiceAccount `
+        -RunLevel Highest
+}
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
@@ -236,7 +249,7 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Principal $taskPrincipal `
     -Settings $settings `
-    -Description "SEALINK FastAPI backend; managed by C:\SEALINK\app\scripts" `
+    -Description "SEALINK FastAPI backend ($taskUser); managed by C:\SEALINK\app\scripts" `
     -Force | Out-Null
 
 Write-Step "Tao firewall rules cho mang noi bo"
