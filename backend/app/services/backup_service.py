@@ -3,6 +3,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -95,18 +96,34 @@ def create_backup(*, keep_last: int = 30) -> dict:
         environment = dict(__import__("os").environ)
         if url.password:
             environment["MYSQL_PWD"] = url.password
-        with gzip.open(destination, "wb", compresslevel=6) as output:
-            completed = subprocess.run(
+        # subprocess writes directly to a file descriptor. Passing a GzipFile
+        # as stdout bypasses its compressor and creates plain SQL with a
+        # misleading .gz extension. Stream stdout through Python instead.
+        with tempfile.TemporaryFile() as error_output:
+            completed = subprocess.Popen(
                 command,
-                stdout=output,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=error_output,
                 env=environment,
-                check=False,
-                timeout=900,
             )
-        if completed.returncode != 0:
+            try:
+                if completed.stdout is None:
+                    raise RuntimeError("Unable to capture mysqldump output.")
+                with gzip.open(destination, "wb", compresslevel=6) as output:
+                    shutil.copyfileobj(completed.stdout, output, length=1024 * 1024)
+                completed.stdout.close()
+                return_code = completed.wait(timeout=900)
+            except BaseException:
+                if completed.poll() is None:
+                    completed.kill()
+                    completed.wait()
+                raise
+            error_output.seek(0)
+            error_bytes = error_output.read()
+
+        if return_code != 0:
             destination.unlink(missing_ok=True)
-            error = completed.stderr.decode("utf-8", errors="replace").strip()
+            error = error_bytes.decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"mysqldump thất bại: {error[:500]}")
     elif settings.is_sqlite:
         database_path = Path(url.database or "")
@@ -123,9 +140,10 @@ def create_backup(*, keep_last: int = 30) -> dict:
     # The extension promises a gzip stream. Refuse to publish a misleading
     # backup file so restore tooling can safely select the correct reader.
     with destination.open("rb") as stream:
-        if stream.read(2) != b"\x1f\x8b":
-            destination.unlink(missing_ok=True)
-            raise RuntimeError("Backup file is not a valid gzip stream.")
+        is_gzip = stream.read(2) == b"\x1f\x8b"
+    if not is_gzip:
+        destination.unlink(missing_ok=True)
+        raise RuntimeError("Backup file is not a valid gzip stream.")
 
     checksum = _write_checksum(destination)
 
