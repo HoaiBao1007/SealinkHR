@@ -156,15 +156,17 @@ New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null
 $stdoutLog = Join-Path $LogDirectory "runtime_check.stdout.log"
 $stderrLog = Join-Path $LogDirectory "runtime_check.stderr.log"
 
+$existingHealth = $null
 try {
     $existingHealth = Invoke-RestMethod -Uri $HealthUrl -Method Get -TimeoutSec 3
-    if ($existingHealth.status -eq "ok") {
-        throw "Port $BackendPort da co API dang chay; khong the xac minh day la process moi."
-    }
-} catch [System.Net.WebException] {
-    # Expected before the temporary Uvicorn process starts.
-} catch [System.Net.Http.HttpRequestException] {
-    # Expected in newer PowerShell versions.
+} catch {
+    # A connection error is expected before temporary Uvicorn starts. Avoid
+    # typed catches because HttpRequestException is not loaded by default in
+    # Windows PowerShell 5.1.
+    $existingHealth = $null
+}
+if ($null -ne $existingHealth -and $existingHealth.status -eq "ok") {
+    throw "Port $BackendPort da co API dang chay; khong the xac minh day la process moi."
 }
 
 Write-Step "Khoi dong Uvicorn tam thoi va kiem tra health"
