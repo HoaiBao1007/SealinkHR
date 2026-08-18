@@ -20,7 +20,7 @@ type WalletJobDetail = {
   earned: number; manualCredit: number; manualDecrease: number; paymentHeld: number; manualHeld: number; held: number; scheduled: number; transferred: number; available: number; paid: number; hasWalletEntry: boolean; remark?: string | null
   paymentVerificationId?: number | null; paymentVerificationStatus?: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'COMMAND_CREATED' | null; paymentReportNote?: string | null; paymentVerificationNote?: string | null; paymentCommandNote?: string | null; paymentReportedAt?: string | null
 }
-type JobEdit = { paymentReceived: 'YES' | 'NO'; manualHeld: string; remark: string; commandNote: string; releaseMode: 'NEXT_QUARTER_LUMP' | 'NEXT_QUARTER_SPLIT'; releasePayoutPeriod: string }
+type JobEdit = { paymentReceived: 'YES' | 'NO'; manualHeld: string; remark: string; commandNote: string; releasePayoutPeriod: string }
 type WalletFocus = {
   periodId: number
   periodLabel: string
@@ -55,10 +55,6 @@ const formatMoneyInput = (value: string) => {
   return numeric ? money(Number(numeric)) : ''
 }
 const normalizedPayment = (value?: string | null): 'YES' | 'NO' => String(value || 'NO').toUpperCase() === 'YES' ? 'YES' : 'NO'
-function MoneyInput({ value, onChange, placeholder, disabled = false }: { value: string; onChange: (value: string) => void; placeholder: string; disabled?: boolean }) {
-  return <input className="ui-input" disabled={disabled} type="text" inputMode="numeric" autoComplete="off" placeholder={placeholder} value={value} onChange={event => onChange(formatMoneyInput(event.target.value))} />
-}
-
 export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false, onJobEditorClose }: { apiBase: string; token: string | null; focus?: WalletFocus; jobEditorOpen?: boolean; onJobEditorClose?: () => void }) {
   const confirm = useConfirmDialog()
   const headers = useMemo((): Record<string, string> => token ? { Authorization: `Bearer ${token}` } : {}, [token])
@@ -74,8 +70,6 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
   const [notificationHighlightJobId, setNotificationHighlightJobId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
-  const [transfer, setTransfer] = useState({ amount: '', source_payout_period: currentMonth(), target_payout_period: currentMonth(), reason: '' })
-  const [schedule, setSchedule] = useState({ amount: '', payout_period: currentMonth(), note: '' })
   const [jobEdits, setJobEdits] = useState<Record<number, JobEdit>>({})
   const [loadedJobContext, setLoadedJobContext] = useState<{ salesRep: string; periodId: number | null } | null>(null)
   const [jobSearch, setJobSearch] = useState('')
@@ -173,7 +167,6 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
       manualHeld: money(job.manualHeld),
       remark: job.remark || '',
       commandNote: job.paymentCommandNote || '',
-      releaseMode: job.heldReleaseMode || 'NEXT_QUARTER_SPLIT',
       releasePayoutPeriod: job.heldReleasePayoutPeriod || job.nextReleasePayoutPeriods?.[0] || currentMonth(),
     }])))
   }, [walletJobs])
@@ -228,20 +221,6 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
     } catch (error) { setMessage((error as Error).message); return false } finally { setBusy(false) }
   }
 
-  async function submitTransfer() {
-    if (isBonusLocked) return setMessage('Bảng bonus đã khóa; không thể chuyển số dư sang tháng khác.')
-    if (!selectedRep || !transfer.amount || !transfer.reason.trim()) return setMessage('Nhập đủ số tiền, kỳ đích và lý do chuyển.')
-    const amount = parseMoneyInput(transfer.amount)
-    if (!await confirm({ title: 'Chuyển bonus sang kỳ khác', message: `Xác nhận chuyển chính xác ${money(amount)} từ tháng lương ${transfer.source_payout_period} sang tháng ${transfer.target_payout_period} cho ${selectedRep}.`, confirmLabel: 'Chuyển bonus' })) return
-    if (await call('/api/commission/wallet/transfers', { sales_rep: selectedRep, amount, source_period_id: selectedPeriodId, source_payout_period: transfer.source_payout_period, target_payout_period: transfer.target_payout_period, reason: transfer.reason })) setTransfer({ amount: '', source_payout_period: currentMonth(), target_payout_period: currentMonth(), reason: '' })
-  }
-
-  async function submitSchedule() {
-    if (isBonusLocked) return setMessage('Bảng bonus đã khóa; không thể lập lịch chi trả.')
-    if (!selectedRep || !schedule.payout_period) return setMessage('Chọn nhân viên và tháng chi trả.')
-    if (await call('/api/commission/wallet/schedules', { sales_rep: selectedRep, source_period_id: selectedPeriodId, amount: schedule.amount ? parseMoneyInput(schedule.amount) : undefined, payout_period: schedule.payout_period, note: schedule.note })) setSchedule({ amount: '', payout_period: currentMonth(), note: '' })
-  }
-
   async function undoLastWalletOperation() {
     if (isBonusLocked) return setMessage('Bảng bonus đã khóa; không thể hoàn tác.')
     if (!selectedRep) return setMessage('Chọn nhân viên trước khi hoàn tác.')
@@ -262,12 +241,10 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
     const edit = jobEdits[job.id]
     if (!edit || !selectedRep) return
     if (isBonusLocked) return setMessage('Bảng bonus đã khóa; không thể đổi hình thức chi trả.')
-    if (edit.releaseMode === 'NEXT_QUARTER_LUMP' && !edit.releasePayoutPeriod) {
-      return setMessage('Chọn tháng trả khi chọn hình thức trả một lần.')
-    }
+    if (!edit.releasePayoutPeriod) return setMessage('Chọn tháng trả một lần.')
     await call(`/api/commission/periods/${job.periodId}/jobs/${job.id}/release-plan`, {
-      release_mode: edit.releaseMode,
-      release_payout_period: edit.releaseMode === 'NEXT_QUARTER_LUMP' ? edit.releasePayoutPeriod : null,
+      release_mode: 'NEXT_QUARTER_LUMP',
+      release_payout_period: edit.releasePayoutPeriod,
     }, 'PUT')
   }
 
@@ -288,9 +265,9 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
   async function createPaymentCommand(job: WalletJobDetail) {
     const edit = jobEdits[job.id]
     if (!job.paymentVerificationId || !edit) return
-    const label = edit.releaseMode === 'NEXT_QUARTER_SPLIT' ? 'chia đều ba tháng của kỳ sau' : `trả một lần tháng ${edit.releasePayoutPeriod}`
-    if (!await confirm({ title: `Lập lệnh chi trả ${job.jobNo}`, message: `Xác nhận ${label}. Số tiền giữ của JOB sẽ được chuyển vào lịch chi trả, lịch sử sổ cái không bị sửa.`, confirmLabel: 'Lập lệnh chi trả' })) return
-    await call(`/api/commission/payment-verifications/${job.paymentVerificationId}/payout-command`, { release_mode: edit.releaseMode, release_payout_period: edit.releaseMode === 'NEXT_QUARTER_LUMP' ? edit.releasePayoutPeriod : null, note: edit.commandNote || null })
+    if (!edit.releasePayoutPeriod) return setMessage('Chọn tháng trả trước khi lập lệnh chi trả.')
+    if (!await confirm({ title: `Lập lệnh chi trả ${job.jobNo}`, message: `Xác nhận trả một lần vào tháng ${edit.releasePayoutPeriod}. Số tiền giữ của JOB sẽ được chuyển vào lịch chi trả, lịch sử sổ cái không bị sửa.`, confirmLabel: 'Lập lệnh chi trả' })) return
+    await call(`/api/commission/payment-verifications/${job.paymentVerificationId}/payout-command`, { release_mode: 'NEXT_QUARTER_LUMP', release_payout_period: edit.releasePayoutPeriod, note: edit.commandNote || null })
   }
 
   async function lockBonusTable() {
@@ -324,15 +301,13 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
     const targetManualHeld = parseMoneyInput(edit.manualHeld)
     const manualHoldChanged = Math.abs(targetManualHeld - job.manualHeld) >= 0.01
     const isReleasingHeldBonus = normalizedPayment(job.paymentReceived) === 'NO' && edit.paymentReceived === 'YES' && job.paymentHeld > 0
-    const releaseDescription = edit.releaseMode === 'NEXT_QUARTER_SPLIT'
-      ? 'chia đều phần đang giữ vào ba tháng của kỳ kế tiếp'
-      : `trả dồn phần đang giữ vào tháng ${edit.releasePayoutPeriod}`
+    const releaseDescription = `trả một lần phần đang giữ vào tháng ${edit.releasePayoutPeriod}`
     if (!paymentChanged && !remarkChanged && !manualHoldChanged) return setMessage(`JOB ${job.jobNo} chưa có thay đổi.`)
     if (!await confirm({ title: `Lưu chỉnh sửa JOB ${job.jobNo}`, message: isReleasingHeldBonus ? `JOB chuyển sang YES: hệ thống sẽ ${releaseDescription}.` : 'Payment Received sẽ đồng bộ lại ví; Giữ thủ công chỉ tạo bút toán chênh lệch và không thay đổi công thức commission.', confirmLabel: 'Lưu chỉnh sửa' })) return
     setBusy(true); setMessage('')
     try {
       if (paymentChanged || remarkChanged) {
-        const paymentRes = await credentialedFetch(`${apiBase}/api/commission/periods/${job.periodId}/jobs/${job.id}/payment`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ payment_received: edit.paymentReceived, remark: edit.remark || null, release_mode: edit.releaseMode, release_payout_period: edit.releaseMode === 'NEXT_QUARTER_LUMP' ? edit.releasePayoutPeriod : null }) })
+        const paymentRes = await credentialedFetch(`${apiBase}/api/commission/periods/${job.periodId}/jobs/${job.id}/payment`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ payment_received: edit.paymentReceived, remark: edit.remark || null, release_mode: 'NEXT_QUARTER_LUMP', release_payout_period: edit.releasePayoutPeriod }) })
         const paymentData = await paymentRes.json()
         if (!paymentRes.ok) throw new Error(paymentData.detail || 'Không thể lưu Payment Received.')
       }
@@ -351,7 +326,7 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
   return <>
   <section className="ui-card" style={{ marginTop: 16, display: 'flex', flexDirection: 'column' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center', order: 40 }}>
-      <div><h3 style={{ margin: 0 }}>Phễu bonus linh động</h3><p style={{ margin: '4px 0 0', color: '#64748b', fontSize: 12 }}>Chuyển kỳ và lập lịch chi trả từ ví thưởng, không thay đổi công thức commission nguồn.</p></div>
+      <div><h3 style={{ margin: 0 }}>Phễu bonus linh động</h3><p style={{ margin: '4px 0 0', color: '#64748b', fontSize: 12 }}>Theo dõi ví thưởng và lịch chi trả, không thay đổi công thức commission nguồn.</p></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {selectedPeriodId != null && <button className="ui-button ui-button-secondary" disabled={busy || !selectedRep || isBonusLocked} onClick={() => void lockBonusTable()}>🔒 {isBonusLocked ? 'Đã khóa bảng bonus' : 'Khóa bảng bonus'}</button>}
         <button className="ui-button ui-button-secondary" disabled={busy || !selectedRep || isBonusLocked} onClick={() => void undoLastWalletOperation()}>↶ Hoàn tác bước gần nhất</button>
@@ -368,11 +343,6 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
     {message && <p className={message.includes('Không') || message.includes('Nhập') ? 'ui-state ui-state-error' : 'ui-state'} style={{ marginTop: 12, padding: 10, order: 43 }}>{message}</p>}
     <div className="ui-table-wrap" style={{ marginTop: 14, order: 44 }}><table className="ui-table"><thead><tr><th>Nhân viên Sales</th><th>Kỳ nguồn → ba tháng chi trả</th><th>Tổng thưởng quý</th><th>Thưởng chuẩn / tháng</th><th>Giữ (cả quý)</th><th>Đã lập lịch</th><th>Đã chuyển kỳ sau</th><th>Khả dụng</th><th>Đã trả</th><th>Thu hồi</th></tr></thead><tbody>{wallets.map(item => <tr key={`${item.sales_rep}-${item.period_id}`} onClick={() => { setSelectedRep(item.sales_rep); setSelectedPeriodId(item.period_id); setSelectedPeriodLabel(item.period_summaries?.[0]?.period_label || item.period_labels?.[0] || '') }} style={{ cursor: 'pointer', background: selectedRep === item.sales_rep && selectedPeriodId === item.period_id ? '#eff6ff' : undefined }}><td>{item.sales_rep}</td><td>{item.period_summaries?.map(period => <div key={period.period_id} style={{ lineHeight: 1.4 }}><b>{period.period_label}</b><br /><small>Trả: {(period.payout_periods || []).map(value => value.replace('-', '/')).join(' · ')}</small></div>)}</td><td style={{ color: '#1d4ed8', fontWeight: 700 }}>{money(item.total_bonus_quarter ?? 0)}</td><td>{item.period_summaries?.length ? item.period_summaries.map(period => <div key={period.period_id}>{money(period.monthly_bonus)}</div>) : money(item.total_earned)}</td><td style={{ color: '#b45309', fontWeight: 700 }}>{money(item.held_amount)}</td><td>{money(item.scheduled_amount)}</td><td style={{ color: '#2563eb', fontWeight: 700 }}>{money(item.transferred_amount)}</td><td style={{ color: item.available_amount < 0 ? '#b91c1c' : '#047857' }}>{money(item.available_amount)}</td><td>{money(item.paid_amount)}</td><td style={{ color: '#b91c1c' }}>{money(item.recoverable_amount)}</td></tr>)}</tbody></table></div>
     {selectedRep && <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 16, marginTop: 16, order: 45 }}>
-        <div className="ui-card"><strong>Chuyển sang kỳ/quý sau</strong><MoneyInput disabled={isBonusLocked} placeholder="Số tiền chuyển" value={transfer.amount} onChange={amount => setTransfer({ ...transfer, amount })} /><label className="ui-field-label">Trừ từ tháng lương</label><input className="ui-input" disabled={isBonusLocked} type="month" value={transfer.source_payout_period} onChange={event => setTransfer({ ...transfer, source_payout_period: event.target.value })} /><label className="ui-field-label">Cộng vào tháng lương</label><input className="ui-input" disabled={isBonusLocked} type="month" value={transfer.target_payout_period} onChange={event => setTransfer({ ...transfer, target_payout_period: event.target.value })} /><input className="ui-input" disabled={isBonusLocked} placeholder="Lý do chuyển" value={transfer.reason} onChange={event => setTransfer({ ...transfer, reason: event.target.value })} /><button className="ui-button ui-button-primary" disabled={busy || isBonusLocked} onClick={submitTransfer}>Chuyển bonus</button></div>
-        <div className="ui-card"><strong>Lập lịch chi trả</strong><MoneyInput disabled={isBonusLocked} placeholder="Để trống = toàn bộ khả dụng" value={schedule.amount} onChange={amount => setSchedule({ ...schedule, amount })} /><input className="ui-input" disabled={isBonusLocked} type="month" value={schedule.payout_period} onChange={event => setSchedule({ ...schedule, payout_period: event.target.value })} /><input className="ui-input" disabled={isBonusLocked} placeholder="Ghi chú" value={schedule.note} onChange={event => setSchedule({ ...schedule, note: event.target.value })} /><button className="ui-button ui-button-primary" disabled={busy || isBonusLocked} onClick={submitSchedule}>Lập lịch</button></div>
-      </div>
-
       <div className="ui-card" style={{ display: 'none' }} aria-hidden="true">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'baseline' }}>
           <div><h4 style={{ margin: 0 }}>JOB đang giữ bonus</h4><small style={{ color: '#92400e' }}>Số dư lấy trực tiếp từ sổ cái. Chọn phương án trước; khi Payment Received chuyển sang YES, hệ thống sẽ áp dụng đúng phương án đã lưu.</small></div>
@@ -382,7 +352,7 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
           const edit = jobEdits[job.id]
           if (!edit) return null
           const months = job.nextReleasePayoutPeriods || []
-          return <tr key={job.id}><td><b>{job.jobNo}</b><small style={{ display: 'block', color: '#64748b' }}>{job.periodLabel}</small></td><td>{job.customer || '—'}</td><td style={{ color: normalizedPayment(job.paymentReceived) === 'YES' ? '#047857' : '#b45309', fontWeight: 700 }}>{normalizedPayment(job.paymentReceived)}</td><td style={{ color: '#b45309' }}>{money(job.paymentHeld)}</td><td style={{ color: '#b91c1c' }}>{money(job.manualHeld)}</td><td style={{ color: '#b45309', fontWeight: 800 }}>{money(job.held)}</td><td><select className="ui-input" disabled={busy || isBonusLocked} style={{ minWidth: 220 }} value={edit.releaseMode} onChange={event => updateJobEdit(job.id, { releaseMode: event.target.value as JobEdit['releaseMode'] })}><option value="NEXT_QUARTER_SPLIT">Chia đều 3 tháng kỳ sau</option><option value="NEXT_QUARTER_LUMP">Trả một lần trong kỳ sau</option></select>{edit.releaseMode === 'NEXT_QUARTER_LUMP' && <select className="ui-input" disabled={busy || isBonusLocked} style={{ minWidth: 135, marginTop: 6 }} value={edit.releasePayoutPeriod} onChange={event => updateJobEdit(job.id, { releasePayoutPeriod: event.target.value })}>{months.map(month => <option key={month} value={month}>{month}</option>)}</select>}<small style={{ display: 'block', marginTop: 4, color: '#64748b' }}>{months.join(' · ')}</small></td><td><button className="ui-button ui-button-secondary" disabled={busy || isBonusLocked} onClick={() => void saveHeldReleasePlan(job)}>Lưu phương án</button></td></tr>
+          return <tr key={job.id}><td><b>{job.jobNo}</b><small style={{ display: 'block', color: '#64748b' }}>{job.periodLabel}</small></td><td>{job.customer || '—'}</td><td style={{ color: normalizedPayment(job.paymentReceived) === 'YES' ? '#047857' : '#b45309', fontWeight: 700 }}>{normalizedPayment(job.paymentReceived)}</td><td style={{ color: '#b45309' }}>{money(job.paymentHeld)}</td><td style={{ color: '#b91c1c' }}>{money(job.manualHeld)}</td><td style={{ color: '#b45309', fontWeight: 800 }}>{money(job.held)}</td><td><b>Trả một lần</b><select className="ui-input" disabled={busy || isBonusLocked} style={{ minWidth: 135, marginTop: 6 }} value={edit.releasePayoutPeriod} onChange={event => updateJobEdit(job.id, { releasePayoutPeriod: event.target.value })}>{months.map(month => <option key={month} value={month}>{month}</option>)}</select><small style={{ display: 'block', marginTop: 4, color: '#64748b' }}>{months.join(' · ')}</small></td><td><button className="ui-button ui-button-secondary" disabled={busy || isBonusLocked} onClick={() => void saveHeldReleasePlan(job)}>Lưu tháng trả</button></td></tr>
         })}</tbody></table></div>}
       </div>
 
@@ -406,7 +376,7 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
               outlineOffset: isNotificationTarget ? -3 : undefined,
               transition: 'background-color 240ms ease, outline-color 240ms ease',
             }}
-          ><td><b>{job.jobNo}</b><small style={{ display: 'block' }}>{job.periodLabel} · {job.customer || '—'}</small></td><td style={{ color: '#b45309', fontWeight: 700 }}>{money(job.paymentHeld)}</td><td style={{ color: '#b91c1c', fontWeight: 700 }}>{money(job.manualHeld)}</td><td style={{ color: '#b45309', fontWeight: 800 }}>{money(job.held)}</td><td><b>{job.paymentHeld <= 0 ? 'Giữ thủ công' : state === 'NONE' ? 'Chưa báo' : state === 'PENDING' ? 'Chờ kế toán xác minh' : state === 'VERIFIED' ? 'Đã xác minh' : state === 'COMMAND_CREATED' ? 'Đã lập lệnh' : 'Đã từ chối'}</b><small style={{ display: 'block' }}>{job.paymentVerificationNote || job.paymentReportNote || ''}</small></td><td><select className="ui-input" disabled={busy || isBonusLocked || state !== 'VERIFIED' || job.paymentHeld <= 0} value={edit.releaseMode} onChange={event => updateJobEdit(job.id, { releaseMode: event.target.value as JobEdit['releaseMode'] })}><option value="NEXT_QUARTER_SPLIT">Chia đều 3 tháng kỳ sau</option><option value="NEXT_QUARTER_LUMP">Trả một lần</option></select>{edit.releaseMode === 'NEXT_QUARTER_LUMP' && <select className="ui-input" disabled={busy || isBonusLocked || state !== 'VERIFIED' || job.paymentHeld <= 0} value={edit.releasePayoutPeriod} onChange={event => updateJobEdit(job.id, { releasePayoutPeriod: event.target.value })}>{months.map(month => <option key={month} value={month}>{month}</option>)}</select>}</td><td>{state === 'COMMAND_CREATED' ? <small>{job.paymentCommandNote || 'Kế toán đã lập lệnh chi trả theo JOB.'}</small> : <input className="ui-input" disabled={busy || isBonusLocked || state !== 'VERIFIED' || job.paymentHeld <= 0} value={edit.commandNote} onChange={event => updateJobEdit(job.id, { commandNote: event.target.value })} placeholder="Nguồn tiền / lý do chi trả" style={{ minWidth: 230 }} />}</td><td>{job.paymentHeld <= 0 ? <span>Không cần báo</span> : state === 'NONE' || state === 'REJECTED' ? <button className="ui-button ui-button-secondary" disabled={busy || isBonusLocked} onClick={() => void reportPayment(job)}>Báo kế toán</button> : state === 'PENDING' ? <><button className="ui-button ui-button-primary" disabled={busy || isBonusLocked} onClick={() => void reviewPayment(job, 'VERIFY')}>Xác minh</button> <button className="ui-button ui-button-secondary" disabled={busy || isBonusLocked} onClick={() => void reviewPayment(job, 'REJECT')}>Từ chối</button></> : state === 'VERIFIED' ? <button className="ui-button ui-button-primary" disabled={busy || isBonusLocked} onClick={() => void createPaymentCommand(job)}>Lập lệnh chi trả</button> : 'Đã tạo lịch'}</td></tr>
+          ><td><b>{job.jobNo}</b><small style={{ display: 'block' }}>{job.periodLabel} · {job.customer || '—'}</small></td><td style={{ color: '#b45309', fontWeight: 700 }}>{money(job.paymentHeld)}</td><td style={{ color: '#b91c1c', fontWeight: 700 }}>{money(job.manualHeld)}</td><td style={{ color: '#b45309', fontWeight: 800 }}>{money(job.held)}</td><td><b>{job.paymentHeld <= 0 ? 'Giữ thủ công' : state === 'NONE' ? 'Chưa báo' : state === 'PENDING' ? 'Chờ kế toán xác minh' : state === 'VERIFIED' ? 'Đã xác minh' : state === 'COMMAND_CREATED' ? 'Đã lập lệnh' : 'Đã từ chối'}</b><small style={{ display: 'block' }}>{job.paymentVerificationNote || job.paymentReportNote || ''}</small></td><td>{state === 'COMMAND_CREATED' && job.heldReleaseMode === 'NEXT_QUARTER_SPLIT' ? <small>Lịch cũ: chia đều 3 tháng</small> : <><b>Trả một lần</b><select className="ui-input" disabled={busy || isBonusLocked || state !== 'VERIFIED' || job.paymentHeld <= 0} value={edit.releasePayoutPeriod} onChange={event => updateJobEdit(job.id, { releasePayoutPeriod: event.target.value })}>{months.map(month => <option key={month} value={month}>{month}</option>)}</select></>}</td><td>{state === 'COMMAND_CREATED' ? <small>{job.paymentCommandNote || 'Kế toán đã lập lệnh chi trả theo JOB.'}</small> : <input className="ui-input" disabled={busy || isBonusLocked || state !== 'VERIFIED' || job.paymentHeld <= 0} value={edit.commandNote} onChange={event => updateJobEdit(job.id, { commandNote: event.target.value })} placeholder="Nguồn tiền / lý do chi trả" style={{ minWidth: 230 }} />}</td><td>{job.paymentHeld <= 0 ? <span>Không cần báo</span> : state === 'NONE' || state === 'REJECTED' ? <button className="ui-button ui-button-secondary" disabled={busy || isBonusLocked} onClick={() => void reportPayment(job)}>Báo kế toán</button> : state === 'PENDING' ? <><button className="ui-button ui-button-primary" disabled={busy || isBonusLocked} onClick={() => void reviewPayment(job, 'VERIFY')}>Xác minh</button> <button className="ui-button ui-button-secondary" disabled={busy || isBonusLocked} onClick={() => void reviewPayment(job, 'REJECT')}>Từ chối</button></> : state === 'VERIFIED' ? <button className="ui-button ui-button-primary" disabled={busy || isBonusLocked} onClick={() => void createPaymentCommand(job)}>Lập lệnh chi trả</button> : 'Đã tạo lịch'}</td></tr>
         })}</tbody></table></div>
       </div>
 
@@ -438,15 +408,11 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
           if (!job || !edit || normalizedPayment(job.paymentReceived) !== 'NO' || job.paymentHeld <= 0) return null
           const targetMonths = job.nextReleasePayoutPeriods || []
           return <div className="ui-card" style={{ margin: '0 0 14px', padding: 12, background: '#fffbeb', borderColor: '#fcd34d' }}>
-            <strong>Phương án dự kiến cho lệnh chi trả của kế toán</strong>
+            <strong>Tháng dự kiến trả một lần</strong>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
               <span style={{ color: '#92400e', fontWeight: 700 }}>Đang giữ: {money(job.paymentHeld)}</span>
-              <select className="ui-input" disabled={busy || isBonusLocked} style={{ width: 260 }} value={edit.releaseMode} onChange={event => updateJobEdit(job.id, { releaseMode: event.target.value as JobEdit['releaseMode'] })}>
-                <option value="NEXT_QUARTER_SPLIT">Chia đều ba tháng kỳ tiếp sau</option>
-                <option value="NEXT_QUARTER_LUMP">Trả dồn một tháng kỳ tiếp sau</option>
-              </select>
-              {edit.releaseMode === 'NEXT_QUARTER_LUMP' && <select className="ui-input" disabled={busy || isBonusLocked} style={{ width: 150 }} value={edit.releasePayoutPeriod} onChange={event => updateJobEdit(job.id, { releasePayoutPeriod: event.target.value })}>{targetMonths.map(month => <option key={month} value={month}>{month}</option>)}</select>}
-              <button className="ui-button ui-button-secondary" disabled={busy || isBonusLocked} onClick={() => void saveHeldReleasePlan(job)}>Lưu phương án</button>
+              <select className="ui-input" disabled={busy || isBonusLocked} style={{ width: 150 }} value={edit.releasePayoutPeriod} onChange={event => updateJobEdit(job.id, { releasePayoutPeriod: event.target.value })}>{targetMonths.map(month => <option key={month} value={month}>{month}</option>)}</select>
+              <button className="ui-button ui-button-secondary" disabled={busy || isBonusLocked} onClick={() => void saveHeldReleasePlan(job)}>Lưu tháng trả</button>
             </div>
             <small style={{ display: 'block', marginTop: 7, color: '#78350f' }}>Ba tháng kỳ kế tiếp: {targetMonths.join(' · ') || 'Chưa xác định'}. Sales báo thanh toán, kế toán xác minh, sau đó lập lệnh ở hàng đợi phía trên.</small>
           </div>
@@ -456,7 +422,7 @@ export function BonusFunnelPanel({ apiBase, token, focus, jobEditorOpen = false,
             <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}><tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}><th style={cellStyle(42)}>#</th><th style={cellStyle(170)}>KỲ/QUÝ</th>{JOB_COLUMNS.map(col => <th key={col.key} style={cellStyle(col.width, col.numeric)}>{col.label}</th>)}<th style={cellStyle(130, true)}>BONUS RÒNG</th><th style={cellStyle(130, true)}>GIỮ TỰ ĐỘNG</th><th style={cellStyle(145, true)}>GIỮ THỦ CÔNG</th><th style={cellStyle(120, true)}>ĐÃ LẬP LỊCH</th><th style={cellStyle(120, true)}>KHẢ DỤNG</th><th style={cellStyle(120, true)}>ĐÃ TRẢ</th><th style={cellStyle(220)}>REMARK</th><th style={cellStyle(110)}>LƯU</th></tr></thead>
             <tbody>{filteredJobs.map((job, index) => {
               const isSelected = job.id === selectedJobId
-              const edit = jobEdits[job.id] || { paymentReceived: normalizedPayment(job.paymentReceived), manualHeld: money(job.manualHeld), remark: job.remark || '', releaseMode: 'NEXT_QUARTER_SPLIT' as const, releasePayoutPeriod: job.nextReleasePayoutPeriods?.[0] || currentMonth() }
+              const edit = jobEdits[job.id] || { paymentReceived: normalizedPayment(job.paymentReceived), manualHeld: money(job.manualHeld), remark: job.remark || '', commandNote: '', releasePayoutPeriod: job.nextReleasePayoutPeriods?.[0] || currentMonth() }
               const preview = getJobPreview(job, edit)
               const isNotificationTarget = job.id === notificationHighlightJobId
               return <tr id={`commission-job-${job.id}`} data-job-id={job.id} key={job.id} onClick={() => setSelectedJobId(job.id)} style={{ cursor: 'pointer', scrollMarginTop: 120, background: isNotificationTarget ? '#fef3c7' : isSelected ? '#dbeafe' : index % 2 === 0 ? '#fff' : '#f8fafc', borderBottom: '1px solid #cbd5e1', outline: isNotificationTarget ? '3px solid #f59e0b' : undefined, outlineOffset: isNotificationTarget ? -3 : undefined, transition: 'background-color 240ms ease, outline-color 240ms ease' }}>

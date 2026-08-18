@@ -204,7 +204,7 @@
 .time-off-event:hover { box-shadow: 0 5px 12px -9px rgba(16, 43, 73, .65); filter: saturate(1.08); transform: translateY(-1px); }
 .time-off-event:active { box-shadow: none; transform: translateY(0) scale(.985); }
 .time-off-event.status-approved { background: linear-gradient(110deg, #ecfdf3 0%, #f6fef9 100%); border-color: #a6f4c5; border-left-color: #12b76a; box-shadow: inset 0 0 0 1px rgb(18 183 106 / 5%); color: #067647; }
-.time-off-event.status-pending_manager { background: #eff8ff; border-left-color: #2e90fa; color: #175cd3; }
+.time-off-event.status-pending_manager { background: #f2f4f7; border-color: #d0d5dd; border-left-color: #98a2b3; color: #475467; }
 .time-off-event.status-more_info_required { background: #fffaeb; border-left-color: #f79009; color: #b54708; }
 .time-off-event.status-rejected { background: #fff1f0; border-left-color: #f04438; color: #b42318; }
 
@@ -224,9 +224,11 @@
 }
 #root main .time-off-day-events > button.time-off-event .time-off-event-name { color: inherit !important; display: block !important; flex: 1 1 auto !important; font-size: 10.5px !important; line-height: 1.2 !important; min-width: 0; opacity: 1 !important; overflow: hidden; text-align: left !important; text-overflow: ellipsis; visibility: visible !important; white-space: nowrap; }
 #root main .time-off-day-events > button.time-off-event.status-approved { background: linear-gradient(110deg, #ecfdf3 0%, #f6fef9 100%) !important; border-color: #a6f4c5 !important; border-left-color: #12b76a !important; color: #067647 !important; }
-#root main .time-off-day-events > button.time-off-event.status-pending_manager { background: #eff8ff !important; border-color: #b2ddff !important; border-left-color: #2e90fa !important; color: #175cd3 !important; }
+#root main .time-off-day-events > button.time-off-event.status-pending_manager { background: #f2f4f7 !important; border-color: #d0d5dd !important; border-left-color: #98a2b3 !important; color: #475467 !important; }
 #root main .time-off-day-events > button.time-off-event.status-more_info_required { background: #fffaeb !important; border-color: #fedf89 !important; border-left-color: #f79009 !important; color: #b54708 !important; }
 #root main .time-off-day-events > button.time-off-event.status-rejected { background: #fff1f0 !important; border-color: #fecdca !important; border-left-color: #f04438 !important; color: #b42318 !important; }
+.time-off-event-count { align-items: center; background: #667085; border-radius: 999px; color: #fff; display: inline-flex; flex: 0 0 auto; font-size: 9px; font-weight: 800; height: 18px; justify-content: center; line-height: 1; min-width: 18px; padding: 0 4px; }
+#root main .time-off-day-events > button.time-off-event .time-off-event-count { color: #fff !important; }
 .time-off-day-more { background: transparent; border: 0; border-radius: 6px; color: var(--to-accent); cursor: pointer; font: inherit; font-size: 10px; font-weight: 750; justify-self: start; margin: 1px 0 0; padding: 4px 5px; text-align: left; transition: background .15s ease, color .15s ease, transform .15s ease; }
 .time-off-day-more:hover { background: var(--to-accent-soft); color: var(--to-accent-strong); }
 .time-off-day-more:active { transform: scale(.97); }

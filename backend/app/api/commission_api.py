@@ -104,10 +104,9 @@ class CommissionPayoutPolicyIn(BaseModel):
 class CommissionJobPaymentIn(BaseModel):
     payment_received: str
     remark: Optional[str] = None
-    # When a previously-held JOB becomes paid, its held commission is paid in
-    # the following commission cycle. The caller chooses either one month or
-    # an even split across that cycle's three payroll months.
-    release_mode: Optional[Literal["NEXT_QUARTER_LUMP", "NEXT_QUARTER_SPLIT"]] = None
+    # New payout commands release a previously-held JOB once, in one selected
+    # payroll month of the following commission cycle.
+    release_mode: Optional[Literal["NEXT_QUARTER_LUMP"]] = None
     release_payout_period: Optional[str] = None
 
 
@@ -121,14 +120,14 @@ class CommissionPaymentVerificationIn(BaseModel):
 
 
 class CommissionPaymentCommandIn(BaseModel):
-    release_mode: Literal["NEXT_QUARTER_LUMP", "NEXT_QUARTER_SPLIT"]
+    release_mode: Literal["NEXT_QUARTER_LUMP"]
     release_payout_period: Optional[str] = None
     note: Optional[str] = None
 
 
 class CommissionJobReleasePlanIn(BaseModel):
     """Preferred payout plan for the held amount of one JOB."""
-    release_mode: Literal["NEXT_QUARTER_LUMP", "NEXT_QUARTER_SPLIT"]
+    release_mode: Literal["NEXT_QUARTER_LUMP"]
     release_payout_period: Optional[str] = None
 
 
@@ -751,7 +750,7 @@ def update_job_payment_received(
         job.bonus_remark = payload.remark.strip() if payload.remark and payload.remark.strip() else job.bonus_remark
         db.commit()
         return {"message": "Trạng thái Payment Received không thay đổi; đã cập nhật ghi chú.", "payment_received": previous, "remark": job.bonus_remark, "wallet_synchronized": False}
-    release_mode = payload.release_mode or job.held_release_mode or "NEXT_QUARTER_SPLIT"
+    release_mode = payload.release_mode or "NEXT_QUARTER_LUMP"
     release_payout_period = payload.release_payout_period or job.held_release_payout_period
     next_release_months: list[str] = []
     if previous == "NO" and normalized == "YES":
@@ -809,15 +808,11 @@ def update_job_payment_received(
             held_amount = round(float(position.get("payment_held", 0.0)), 2)
             if held_amount >= 0.005:
                 source = job_entries[0]
-                if release_mode == "NEXT_QUARTER_LUMP":
-                    target_month = release_payout_period or target_months[0]
-                    if target_month not in target_months:
-                        raise HTTPException(status_code=422, detail="Tháng trả dồn phải thuộc ba tháng của kỳ commission kế tiếp.")
-                    allocations = [(target_month, held_amount)]
-                    release_note = f"Payment Received NO → YES; trả dồn phần giữ vào tháng {target_month}."
-                else:
-                    allocations = list(zip(target_months, _split_evenly(held_amount)))
-                    release_note = "Payment Received NO → YES; chia đều phần giữ vào ba tháng của kỳ commission kế tiếp."
+                target_month = release_payout_period or target_months[0]
+                if target_month not in target_months:
+                    raise HTTPException(status_code=422, detail="Tháng trả một lần phải thuộc ba tháng của kỳ commission kế tiếp.")
+                allocations = [(target_month, held_amount)]
+                release_note = f"Payment Received NO → YES; trả một lần phần giữ vào tháng {target_month}."
                 db.add(CommissionWalletLedger(
                     period_id=source.period_id, job_id=source.job_id, entitlement_id=source.entitlement_id,
                     sales_rep=source.sales_rep, employee_id=source.employee_id,
@@ -924,18 +919,17 @@ def create_commission_payment_command(verification_id: int, payload: CommissionP
     target_months = _next_commission_payout_periods(period)
     if len(target_months) != 3:
         raise HTTPException(status_code=422, detail="Không xác định được ba tháng chi trả của kỳ sau.")
-    if payload.release_mode == "NEXT_QUARTER_LUMP":
-        target = payload.release_payout_period or target_months[0]
-        if target not in target_months:
-            raise HTTPException(status_code=422, detail="Tháng chi trả một lần phải thuộc ba tháng của kỳ sau.")
-        allocations = [(target, held_amount)]
-    else:
-        allocations = list(zip(target_months, _split_evenly(held_amount)))
+    target = payload.release_payout_period
+    if not target:
+        raise HTTPException(status_code=422, detail="Phải chọn tháng chi trả một lần.")
+    if target not in target_months:
+        raise HTTPException(status_code=422, detail="Tháng chi trả một lần phải thuộc ba tháng của kỳ sau.")
+    allocations = [(target, held_amount)]
     source = source_entries[0] if source_entries else None
     if not source:
         raise HTTPException(status_code=422, detail="Không tìm thấy sổ cái nguồn của JOB.")
     actor = _actor_name(current_user)
-    command_note = payload.note.strip() if payload.note and payload.note.strip() else ("Lệnh kế toán: trả một lần bonus JOB đã xác minh." if payload.release_mode == "NEXT_QUARTER_LUMP" else "Lệnh kế toán: chia đều bonus JOB đã xác minh cho ba tháng kỳ sau.")
+    command_note = payload.note.strip() if payload.note and payload.note.strip() else f"Lệnh kế toán: trả một lần bonus JOB đã xác minh vào tháng {target}."
     db.add(CommissionWalletLedger(period_id=source.period_id, job_id=source.job_id, entitlement_id=source.entitlement_id, sales_rep=source.sales_rep, employee_id=source.employee_id, entry_type="RELEASED", amount=held_amount, reason_code="ACCOUNTING_PAYMENT_COMMAND", note=command_note, created_by=actor, approved_by=actor))
     schedule_ids = []
     for payout_period, amount in allocations:
@@ -948,8 +942,8 @@ def create_commission_payment_command(verification_id: int, payload: CommissionP
         db.add(CommissionPayoutScheduleAllocation(schedule_id=schedule.id, entitlement_id=source.entitlement_id, ledger_entry_id=ledger.id, amount=amount))
         schedule_ids.append(schedule.id)
     verification.status = "COMMAND_CREATED"; verification.command_created_by = actor; verification.command_created_at = datetime.now(timezone.utc)
-    job.held_release_mode = payload.release_mode
-    job.held_release_payout_period = payload.release_payout_period if payload.release_mode == "NEXT_QUARTER_LUMP" else None
+    job.held_release_mode = "NEXT_QUARTER_LUMP"
+    job.held_release_payout_period = target
     if source.employee_id:
         from app.models.employee import Employee
 
@@ -1009,12 +1003,6 @@ def _next_commission_payout_periods(period: CommissionPeriod) -> list[str]:
         month = 1 if month == 12 else month + 1
         result.append(f"{year:04d}-{month:02d}")
     return result
-
-
-def _split_evenly(amount: float, count: int = 3) -> list[float]:
-    """Split VND precisely: the last part keeps the rounding remainder."""
-    regular = round(amount / count, 2)
-    return [regular] * (count - 1) + [round(amount - regular * (count - 1), 2)]
 
 
 def _wallet_positions(entries: list[CommissionWalletLedger]) -> dict[tuple[str, Optional[int]], dict]:
@@ -1567,7 +1555,7 @@ def get_commission_wallet_jobs(
             "containerPicked": job.container_picked,
             "paymentReceived": job.payment_received,
             "remark": job.bonus_remark,
-            "heldReleaseMode": job.held_release_mode or "NEXT_QUARTER_SPLIT",
+            "heldReleaseMode": job.held_release_mode or "NEXT_QUARTER_LUMP",
             "heldReleasePayoutPeriod": job.held_release_payout_period,
             "paymentVerificationId": verification.id if verification else None,
             "paymentVerificationStatus": verification.status if verification else None,
@@ -1609,13 +1597,10 @@ def update_commission_job_release_plan(
     target_months = _next_commission_payout_periods(period) if period else []
     if not target_months:
         raise HTTPException(status_code=422, detail="Kỳ nguồn chưa đủ dữ liệu để xác định ba tháng trả kế tiếp.")
-    if payload.release_mode == "NEXT_QUARTER_LUMP":
-        if payload.release_payout_period not in target_months:
-            raise HTTPException(status_code=422, detail="Tháng trả một lần phải thuộc ba tháng của kỳ kế tiếp.")
-        job.held_release_payout_period = payload.release_payout_period
-    else:
-        job.held_release_payout_period = None
-    job.held_release_mode = payload.release_mode
+    if payload.release_payout_period not in target_months:
+        raise HTTPException(status_code=422, detail="Tháng trả một lần phải thuộc ba tháng của kỳ kế tiếp.")
+    job.held_release_payout_period = payload.release_payout_period
+    job.held_release_mode = "NEXT_QUARTER_LUMP"
     db.commit()
     return {
         "message": "Đã lưu hình thức chi trả cho số bonus đang giữ của JOB.",

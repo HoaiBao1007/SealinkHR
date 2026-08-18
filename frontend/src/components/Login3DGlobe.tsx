@@ -21,8 +21,9 @@ type NaturalEarthBoundaryCollection = {
   features: Array<{ geometry: NaturalEarthBoundaryGeometry | null }>;
 };
 
-const NATURAL_EARTH_LAND_URL = '/data/ne_110m_land.geojson';
-const NATURAL_EARTH_BOUNDARIES_URL = '/data/ne_110m_admin_0_boundary_lines_land.geojson';
+const NATURAL_EARTH_DATA_VERSION = '20260817';
+const NATURAL_EARTH_LAND_URL = `/data/ne_110m_land.geojson?v=${NATURAL_EARTH_DATA_VERSION}`;
+const NATURAL_EARTH_BOUNDARIES_URL = `/data/ne_110m_admin_0_boundary_lines_land.geojson?v=${NATURAL_EARTH_DATA_VERSION}`;
 
 export default function Login3DGlobe() {
   const mountRef = useRef<HTMLDivElement>(null);

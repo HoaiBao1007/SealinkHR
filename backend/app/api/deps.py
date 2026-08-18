@@ -5,6 +5,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import verify_token
+from app.core.settings import settings
 from app.db.session import SessionLocal
 from app.models.user import User
 from app.models.employee import Employee
@@ -63,7 +64,7 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Tài khoản không tồn tại.",
         )
-    if user.role == IT_ADMIN:
+    if user.role == IT_ADMIN and settings.it_admin_trusted_device_required:
         token_device_id = payload.get("trusted_device_id")
         raw_device_credential = request.cookies.get(TRUSTED_DEVICE_COOKIE)
         trusted_device = active_device_for_credential(

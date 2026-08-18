@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     secret_key: str
     token_expire_seconds: int = 3600
     it_admin_default_device_label: str = "70-A8-D3-1E-B5-4F"
+    # Emergency/temporary bypass. Keep enabled by default and override only in
+    # the deployment environment when IT_ADMIN must log in from any device.
+    it_admin_trusted_device_required: bool = True
     trusted_device_cookie_secure: bool = False
     # Browsers cannot expose a client's physical MAC address to a web server.
     # When an IT administrator clears cookies or uses a private window, allow

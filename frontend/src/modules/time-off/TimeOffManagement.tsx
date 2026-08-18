@@ -167,6 +167,27 @@ function eventsForCalendarDay(events: TimeOffRequest[], day: string) {
     .sort((a, b) => a.employee.full_name.localeCompare(b.employee.full_name, 'vi-VN') || a.id - b.id)
 }
 
+type CalendarEventGroup = {
+  key: string
+  employeeName: string
+  primary: TimeOffRequest
+  items: TimeOffRequest[]
+}
+
+function groupCalendarEventsByEmployee(events: TimeOffRequest[]) {
+  const grouped = new Map<string, TimeOffRequest[]>()
+  events.forEach((item) => {
+    const employeeKey = item.employee.id != null ? `employee-${item.employee.id}` : `name-${item.employee.full_name}`
+    grouped.set(employeeKey, [...(grouped.get(employeeKey) || []), item])
+  })
+  return Array.from(grouped.entries()).map(([key, items]): CalendarEventGroup => ({
+    key,
+    employeeName: items[0]?.employee.full_name || 'Nhân viên',
+    primary: [...items].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime() || b.id - a.id)[0],
+    items,
+  }))
+}
+
 function formatCalendarDay(value: string) {
   const [year, month, day] = value.split('-')
   return `${day}/${month}/${year}`
@@ -544,8 +565,9 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
                     const value = isoDate(day)
                     const outside = day.getMonth() !== month.getMonth()
                     const dayEvents = eventsForCalendarDay(visibleCalendarEvents, value)
-                    const visibleEvents = dayEvents.slice(0, 2)
-                    const hiddenEventCount = dayEvents.length - visibleEvents.length
+                    const eventGroups = groupCalendarEventsByEmployee(dayEvents)
+                    const visibleEventGroups = eventGroups.slice(0, 2)
+                    const hiddenGroupCount = eventGroups.length - visibleEventGroups.length
                     return (
                       <div
                         key={value}
@@ -553,25 +575,28 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
                       >
                         <span>{day.getDate()}</span>
                         <div className="time-off-day-events">
-                          {visibleEvents.map((item) => (
+                          {visibleEventGroups.map((group) => (
                             <button
                               type="button"
-                              key={`${item.id}-${value}`}
-                              className={`time-off-event status-${item.status.toLowerCase()}`}
-                              onClick={() => void openRequest(item.id)}
-                              title={`${item.employee.full_name} · ${item.department.name || 'Chưa có phòng ban'} · ${formatDateTime(item.start_at)} → ${formatDateTime(item.end_at)} · ${item.status_label}`}
+                              key={`${group.key}-${value}`}
+                              className={`time-off-event status-${group.primary.status.toLowerCase()}`}
+                              onClick={() => group.items.length === 1 ? void openRequest(group.primary.id) : setSelectedCalendarDay({ date: value, items: group.items })}
+                              title={group.items.length === 1
+                                ? `${group.employeeName} · ${group.primary.department.name || 'Chưa có phòng ban'} · ${formatDateTime(group.primary.start_at)} → ${formatDateTime(group.primary.end_at)} · ${group.primary.status_label}`
+                                : `${group.employeeName} · ${group.items.length} đơn nghỉ trong ngày · Nhấn để xem chi tiết`}
                             >
                               <span className="time-off-event-dot" />
-                              <strong className="time-off-event-name">{item.employee.full_name || 'Nhân viên'}</strong>
+                              <strong className="time-off-event-name">{group.employeeName}</strong>
+                              {group.items.length > 1 && <span className="time-off-event-count" aria-label={`${group.items.length} đơn nghỉ`}>{group.items.length}</span>}
                             </button>
                           ))}
-                          {hiddenEventCount > 0 && (
+                          {hiddenGroupCount > 0 && (
                             <button
                               type="button"
                               className="time-off-day-more"
                               onClick={() => setSelectedCalendarDay({ date: value, items: dayEvents })}
                             >
-                              +{hiddenEventCount} Xem thêm
+                              +{hiddenGroupCount} Xem thêm
                             </button>
                           )}
                         </div>
@@ -698,7 +723,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
         <div className="ui-modal-backdrop time-off-day-events-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedCalendarDay(null) }}>
           <section className="time-off-day-events-modal" role="dialog" aria-modal="true" aria-label="Danh sách nhân viên nghỉ trong ngày" onMouseDown={(event) => event.stopPropagation()}>
             <header>
-              <div><span>TIME OFF CALENDAR</span><h3>Ngày {formatCalendarDay(selectedCalendarDay.date)}</h3><p>{selectedCalendarDay.items.length} nhân viên có yêu cầu nghỉ trong ngày này.</p></div>
+              <div><span>TIME OFF CALENDAR</span><h3>Ngày {formatCalendarDay(selectedCalendarDay.date)}</h3><p>{selectedCalendarDay.items.length} đơn nghỉ trong ngày này.</p></div>
               <button type="button" className="app-close-button" onClick={() => setSelectedCalendarDay(null)} aria-label="Đóng">×</button>
             </header>
             <div className="time-off-day-events-list">

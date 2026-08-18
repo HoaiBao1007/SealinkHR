@@ -48,17 +48,21 @@ def enroll_pending_device(
     *,
     user_id: int,
     source_ip: str | None,
+    require_explicit_enrollment_ip: bool = False,
 ) -> tuple[TrustedDevice, str] | None:
-    pending = (
+    pending_query = (
         db.query(TrustedDevice)
         .filter(
             TrustedDevice.user_id == user_id,
             TrustedDevice.is_active.is_(False),
             TrustedDevice.credential_hash.is_(None),
         )
-        .order_by(TrustedDevice.id.asc())
-        .first()
     )
+    if require_explicit_enrollment_ip:
+        if not source_ip:
+            return None
+        pending_query = pending_query.filter(TrustedDevice.enrollment_ip == source_ip)
+    pending = pending_query.order_by(TrustedDevice.id.asc()).first()
     if not pending:
         return None
     if pending.enrollment_ip and pending.enrollment_ip != source_ip:

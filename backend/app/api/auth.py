@@ -61,7 +61,7 @@ def login(
     source_ip = request_source_ip(request)
     trusted_device = None
     new_device_credential = None
-    if user.role == IT_ADMIN:
+    if user.role == IT_ADMIN and settings.it_admin_trusted_device_required:
         trusted_device = request_device(db, request, user_id=user.id)
         if not trusted_device:
             active_device = (
@@ -92,11 +92,16 @@ def login(
                     device_address=trusted_device.device_label,
                 )
             enrollment = None
-            if not recovered and not active_device:
+            if not recovered:
                 enrollment = enroll_pending_device(
                     db,
                     user_id=user.id,
                     source_ip=source_ip,
+                    # Additional admin browsers are allowed only after a
+                    # server operator has created a pending enrollment for
+                    # this exact source IP. Initial provisioning keeps the
+                    # existing optional-IP behavior.
+                    require_explicit_enrollment_ip=active_device is not None,
                 )
             if not recovered and enrollment:
                 trusted_device, new_device_credential = enrollment

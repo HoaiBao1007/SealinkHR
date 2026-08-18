@@ -144,9 +144,9 @@ def test_commission_wallet_holds_releases_and_pays_by_job(client, db_session):
     assert pending["paymentHeld"] > 0
     verification_id = pending["paymentVerificationId"]
     assert client.post(f"/api/commission/payment-verifications/{verification_id}/review", json={"action": "VERIFY"}).status_code == 200
-    command = client.post(f"/api/commission/payment-verifications/{verification_id}/payout-command", json={"release_mode": "NEXT_QUARTER_SPLIT"})
+    command = client.post(f"/api/commission/payment-verifications/{verification_id}/payout-command", json={"release_mode": "NEXT_QUARTER_LUMP", "release_payout_period": "2026-10"})
     assert command.status_code == 200
-    assert len(command.json()["schedule_ids"]) == 3
+    assert len(command.json()["schedule_ids"]) == 1
     after_command = next(item for item in client.get("/api/commission/wallet/jobs", params={"sales_rep": "NGUYEN VAN WALLET"}).json() if item["id"] == no_job_id)
     assert after_command["paymentHeld"] == 0
     assert after_command["scheduled"] > 0
@@ -221,75 +221,66 @@ def test_commission_wallet_holds_releases_and_pays_by_job(client, db_session):
     assert other_wallet and other_wallet[0]["total_earned"] > 0
 
 
-def test_payment_received_release_is_allocated_to_the_next_cycle(client, db_session):
+def test_payment_command_requires_one_selected_month_in_the_next_cycle(client, db_session):
     from app.models.commission import CommissionCalculationSnapshot, CommissionJob, CommissionWalletLedger
     from app.services.salary import get_commission_payslip_summary, get_sales_bonus_for_employee_period
 
-    split_employee = Employee(machine_employee_id="RELEASE-SPLIT", full_name="NGUYEN RELEASE SPLIT", contract_salary=10_000_000, employee_type="FULLTIME", annual_leave_quota=12)
-    lump_employee = Employee(machine_employee_id="RELEASE-LUMP", full_name="NGUYEN RELEASE LUMP", contract_salary=10_000_000, employee_type="FULLTIME", annual_leave_quota=12)
-    db_session.add_all([split_employee, lump_employee])
+    employee = Employee(machine_employee_id="RELEASE-ONCE", full_name="NGUYEN RELEASE ONCE", contract_salary=10_000_000, employee_type="FULLTIME", annual_leave_quota=12)
+    db_session.add(employee)
     db_session.commit()
     imported = client.post("/api/commission/import", json={
         "period_label": "RELEASE-Q2-2026", "from_date": "2026-04-01", "till_date": "2026-06-30",
-        "jobs": [
-            {"job_no": "RELEASE-SPLIT-JOB", "sales_rep": split_employee.full_name, "profit_loss": 100_000_000, "payment_received": "NO"},
-            {"job_no": "RELEASE-LUMP-JOB", "sales_rep": lump_employee.full_name, "profit_loss": 100_000_000, "payment_received": "NO"},
-        ],
+        "jobs": [{"job_no": "RELEASE-ONCE-JOB", "sales_rep": employee.full_name, "profit_loss": 100_000_000, "payment_received": "NO"}],
     })
     assert imported.status_code == 201
     period_id = imported.json()["period_id"]
     assert client.post("/api/commission/wallet/sync", json={"period_id": period_id}).status_code == 200
 
-    split_job = db_session.query(CommissionJob).filter(CommissionJob.job_no == "RELEASE-SPLIT-JOB").one()
-    lump_job = db_session.query(CommissionJob).filter(CommissionJob.job_no == "RELEASE-LUMP-JOB").one()
-    split_held = next(item for item in client.get("/api/commission/wallet/jobs", params={"sales_rep": split_employee.full_name}).json() if item["id"] == split_job.id)["paymentHeld"]
-    lump_held = next(item for item in client.get("/api/commission/wallet/jobs", params={"sales_rep": lump_employee.full_name}).json() if item["id"] == lump_job.id)["paymentHeld"]
+    job = db_session.query(CommissionJob).filter(CommissionJob.job_no == "RELEASE-ONCE-JOB").one()
+    held = next(item for item in client.get("/api/commission/wallet/jobs", params={"sales_rep": employee.full_name}).json() if item["id"] == job.id)["paymentHeld"]
+    report = client.patch(f"/api/commission/periods/{period_id}/jobs/{job.id}/payment", json={"payment_received": "YES"})
+    assert report.status_code == 200
+    pending = next(item for item in client.get("/api/commission/wallet/jobs", params={"sales_rep": employee.full_name}).json() if item["id"] == job.id)
+    assert pending["paymentHeld"] == held
+    verification_id = pending["paymentVerificationId"]
+    assert client.post(f"/api/commission/payment-verifications/{verification_id}/review", json={"action": "VERIFY"}).status_code == 200
 
-    split_release = client.patch(f"/api/commission/periods/{period_id}/jobs/{split_job.id}/payment", json={"payment_received": "YES", "release_mode": "NEXT_QUARTER_SPLIT"})
-    assert split_release.status_code == 200
-    split_pending = next(item for item in client.get("/api/commission/wallet/jobs", params={"sales_rep": split_employee.full_name}).json() if item["id"] == split_job.id)
-    assert split_pending["paymentHeld"] == split_held
-    split_verification_id = split_pending["paymentVerificationId"]
-    assert client.post(f"/api/commission/payment-verifications/{split_verification_id}/review", json={"action": "VERIFY"}).status_code == 200
-    split_command = client.post(f"/api/commission/payment-verifications/{split_verification_id}/payout-command", json={
+    split_command = client.post(f"/api/commission/payment-verifications/{verification_id}/payout-command", json={
         "release_mode": "NEXT_QUARTER_SPLIT",
-        "note": "Khách hàng đã thanh toán JOB RELEASE-SPLIT-JOB; kế toán chia đều khoản bị giữ.",
     })
-    assert split_command.status_code == 200
-    scheduled = client.get("/api/commission/wallet/schedules", params={"sales_rep": split_employee.full_name}).json()
-    assert [item["payout_period"] for item in scheduled] == ["2026-10", "2026-11", "2026-12"]
-    assert round(sum(item["total_amount"] for item in scheduled), 2) == round(split_held, 2)
-    # Payment commands for a held JOB belong to the following commission
-    # cycle and must appear in its target salary months.
-    assert round(sum(get_sales_bonus_for_employee_period(db_session, split_employee.id, month) for month in ("2026-10", "2026-11", "2026-12")), 2) == round(split_held, 2)
-    october_summary = get_commission_payslip_summary(db_session, split_employee, "2026-10")
-    assert october_summary["scheduled_job_payout_total"] > 0
-    assert october_summary["scheduled_job_payouts"] == [{
-        "job_no": "RELEASE-SPLIT-JOB", "customer": None,
+    assert split_command.status_code == 422
+    missing_month = client.post(f"/api/commission/payment-verifications/{verification_id}/payout-command", json={"release_mode": "NEXT_QUARTER_LUMP"})
+    assert missing_month.status_code == 422
+
+    command = client.post(f"/api/commission/payment-verifications/{verification_id}/payout-command", json={
+        "release_mode": "NEXT_QUARTER_LUMP",
+        "release_payout_period": "2026-11",
+        "note": "Khách hàng đã thanh toán JOB RELEASE-ONCE-JOB; kế toán trả một lần.",
+    })
+    assert command.status_code == 200
+    assert len(command.json()["schedule_ids"]) == 1
+    scheduled = client.get("/api/commission/wallet/schedules", params={"sales_rep": employee.full_name}).json()
+    assert [(item["payout_period"], item["total_amount"]) for item in scheduled] == [("2026-11", held)]
+    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-10") == 0
+    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-11") == held
+    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-12") == 0
+    november_summary = get_commission_payslip_summary(db_session, employee, "2026-11")
+    assert november_summary["scheduled_job_payout_total"] == held
+    assert november_summary["scheduled_job_payouts"] == [{
+        "job_no": "RELEASE-ONCE-JOB", "customer": None,
         "source_period_label": "RELEASE-Q2-2026",
-        "amount": october_summary["scheduled_job_payout_total"],
-        "note": "Khách hàng đã thanh toán JOB RELEASE-SPLIT-JOB; kế toán chia đều khoản bị giữ.",
+        "amount": held,
+        "note": "Khách hàng đã thanh toán JOB RELEASE-ONCE-JOB; kế toán trả một lần.",
     }]
-    return
-    assert [item["payout_period"] for item in split_release.json()["release_allocations"]] == ["2026-10", "2026-11", "2026-12"]
-    assert round(sum(item["amount"] for item in split_release.json()["release_allocations"]), 2) == round(split_held, 2)
-
-    lump_release = client.patch(f"/api/commission/periods/{period_id}/jobs/{lump_job.id}/payment", json={"payment_received": "YES", "release_mode": "NEXT_QUARTER_LUMP", "release_payout_period": "2026-11"})
-    assert lump_release.status_code == 200
-    assert lump_release.json()["release_allocations"] == [{"payout_period": "2026-11", "amount": lump_held}]
-
-    split_snapshot = db_session.query(CommissionCalculationSnapshot).filter(
+    snapshot = db_session.query(CommissionCalculationSnapshot).filter(
         CommissionCalculationSnapshot.period_id == period_id,
-        CommissionCalculationSnapshot.employee_id == split_employee.id,
+        CommissionCalculationSnapshot.employee_id == employee.id,
     ).order_by(CommissionCalculationSnapshot.id.desc()).first()
-    split_source = sum(get_sales_bonus_for_employee_period(db_session, split_employee.id, month) for month in ("2026-07", "2026-08", "2026-09"))
-    split_future = sum(get_sales_bonus_for_employee_period(db_session, split_employee.id, month) for month in ("2026-10", "2026-11", "2026-12"))
-    assert round(split_source + split_future, 2) == round(float(split_snapshot.total_bonus_quarter), 2)
-    assert get_sales_bonus_for_employee_period(db_session, lump_employee.id, "2026-10") == 0
-    assert get_sales_bonus_for_employee_period(db_session, lump_employee.id, "2026-11") == lump_held
-    assert get_sales_bonus_for_employee_period(db_session, lump_employee.id, "2026-12") == 0
+    source_total = sum(get_sales_bonus_for_employee_period(db_session, employee.id, month) for month in ("2026-07", "2026-08", "2026-09"))
+    future_total = sum(get_sales_bonus_for_employee_period(db_session, employee.id, month) for month in ("2026-10", "2026-11", "2026-12"))
+    assert round(source_total + future_total, 2) == round(float(snapshot.total_bonus_quarter), 2)
     types = {row.entry_type for row in db_session.query(CommissionWalletLedger).filter(CommissionWalletLedger.period_id == period_id).all()}
-    assert {"RELEASED", "PAYMENT_RELEASE_ALLOCATION"}.issubset(types)
+    assert {"RELEASED", "SCHEDULED"}.issubset(types)
 
 
 def test_payslip_commission_summary_explains_quarter_and_unpaid_jobs(client, db_session):
@@ -451,5 +442,5 @@ def test_held_job_release_plan_and_bonus_lock_are_persisted_and_enforced(client,
     assert locked.status_code == 200
     assert client.get("/api/commission/wallet/lock", params={"period_id": period_id, "sales_rep": employee.full_name}).json()["locked"] is True
     assert client.patch(f"/api/commission/periods/{period_id}/jobs/{job.id}/payment", json={"payment_received": "YES"}).status_code == 409
-    assert client.put(f"/api/commission/periods/{period_id}/jobs/{job.id}/release-plan", json={"release_mode": "NEXT_QUARTER_SPLIT"}).status_code == 409
+    assert client.put(f"/api/commission/periods/{period_id}/jobs/{job.id}/release-plan", json={"release_mode": "NEXT_QUARTER_LUMP", "release_payout_period": "2026-11"}).status_code == 409
     assert client.put(f"/api/commission/wallet/jobs/{job.id}/manual-hold", json={"sales_rep": employee.full_name, "manual_held_amount": 0}).status_code == 409

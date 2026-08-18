@@ -1,18 +1,20 @@
 import pytest
 from app.api.deps import get_current_user, get_admin_user
 from app.core.auth import get_password_hash
+from app.core.settings import settings
 from app.models.user import User
 from app.models.employee import Employee
 from app.models.monthly_salary_input import MonthlySalaryInput
 from app.models.system_audit_event import SystemAuditEvent
 from app.models.trusted_device import TrustedDevice
-from app.services.trusted_device_service import TRUSTED_DEVICE_COOKIE
+from app.services.trusted_device_service import TRUSTED_DEVICE_COOKIE, hash_device_credential
 from app.main import app
 
 
-def test_it_admin_login_is_bound_to_registered_browser(client, db_session):
+def test_it_admin_login_is_bound_to_registered_browser(client, db_session, monkeypatch):
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_admin_user, None)
+    monkeypatch.setattr(settings, "it_admin_trusted_device_required", True)
 
     it_admin = User(
         username="it_device_test",
@@ -105,6 +107,87 @@ def test_it_admin_login_is_bound_to_registered_browser(client, db_session):
     assert login_event is not None
     assert login_event.source_ip == "testclient"
     assert login_event.device_address == "70-A8-D3-1E-B5-4F"
+
+
+def test_it_admin_can_enroll_an_additional_preapproved_device(client, db_session, monkeypatch):
+    app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_admin_user, None)
+    monkeypatch.setattr(settings, "it_admin_trusted_device_required", True)
+
+    it_admin = User(
+        username="it_additional_device_test",
+        password_hash=get_password_hash("safePassword123"),
+        role="IT_ADMIN",
+    )
+    db_session.add(it_admin)
+    db_session.flush()
+    existing = TrustedDevice(
+        user_id=it_admin.id,
+        device_label="70-A8-D3-1E-B5-4F",
+        enrollment_ip="existing-network",
+        credential_hash=hash_device_credential("existing-browser-credential"),
+        is_active=True,
+    )
+    pending = TrustedDevice(
+        user_id=it_admin.id,
+        device_label="28-92-00-6F-20-98",
+        enrollment_ip="wrong-network",
+        is_active=False,
+    )
+    db_session.add_all([existing, pending])
+    db_session.commit()
+
+    # An existing active device does not make an unapproved source eligible.
+    denied = client.post(
+        "/api/auth/login",
+        json={"username": it_admin.username, "password": "safePassword123"},
+    )
+    assert denied.status_code == 403
+    db_session.refresh(pending)
+    assert pending.is_active is False
+    assert pending.credential_hash is None
+
+    # Once the server operator pins the pending enrollment to this exact IP,
+    # the next valid login enrolls it without revoking the existing browser.
+    pending.enrollment_ip = "testclient"
+    db_session.commit()
+    enrolled = client.post(
+        "/api/auth/login",
+        json={"username": it_admin.username, "password": "safePassword123"},
+    )
+    assert enrolled.status_code == 200
+    assert client.cookies.get(TRUSTED_DEVICE_COOKIE)
+    db_session.refresh(existing)
+    db_session.refresh(pending)
+    assert existing.is_active is True
+    assert pending.is_active is True
+    assert pending.credential_hash
+
+
+def test_it_admin_device_gate_can_be_temporarily_disabled(client, db_session, monkeypatch):
+    app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_admin_user, None)
+    monkeypatch.setattr(settings, "it_admin_trusted_device_required", False)
+
+    it_admin = User(
+        username="it_device_bypass_test",
+        password_hash=get_password_hash("safePassword123"),
+        role="IT_ADMIN",
+    )
+    db_session.add(it_admin)
+    db_session.commit()
+
+    login = client.post(
+        "/api/auth/login",
+        json={"username": it_admin.username, "password": "safePassword123"},
+    )
+    assert login.status_code == 200
+    assert client.cookies.get(TRUSTED_DEVICE_COOKIE) is None
+    access_token = login.json()["access_token"]
+    assert client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    ).status_code == 200
 
 
 def test_authentication_and_authorization_flow(client, db_session):
