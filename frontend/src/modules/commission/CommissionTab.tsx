@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as XLSX from 'xlsx'
 import { useConfirmDialog } from '../../shared/ui/ConfirmDialog'
@@ -6,6 +6,7 @@ import { credentialedFetch } from '../../shared/api/credentialedFetch'
 import { BonusFunnelPanel } from './BonusFunnelPanel'
 import { VndInput } from '../../shared/ui/VndInput'
 import { formatVietnameseNumber, parseVndInput } from '../../shared/utils/currency'
+import { AppIcon } from '../../shared/ui/AppIcon'
 
 function parseDateStringToDate(s: string): Date | null {
   if (!s) return null;
@@ -105,6 +106,44 @@ const CLIMAX_COLUMNS = [
 // Types
 // ══════════════════════════════════════════════════════════
 type JobPnLRow = Record<string, string | number>
+type DetailJobTab = 'source' | 'payable' | 'held'
+
+type CommissionReceivableAttachment = {
+  id: number
+  period_id: number
+  job_id: number
+  job_no: string
+  sales_rep?: string | null
+  original_filename: string
+  content_type?: string | null
+  size_bytes: number
+  note?: string | null
+  uploaded_by?: string | null
+  created_at: string
+}
+
+type CommissionReceivableReconciliation = {
+  original_filename: string
+  positive_rows: number
+  ignored_non_positive_rows: number
+  invalid_positive_rows: number
+  matched_jobs: number
+  unmatched_positive_jobs: number
+  unmatched_job_nos: string[]
+  attachment: CommissionReceivableAttachment
+  updates: Array<{
+    job_id: number
+    job_no: string
+    source_rows: number
+    receivable_amount: number
+    payment_received_amount: number
+    balance_amount: number
+    paid_percent: number
+    hold_bonus_percent: number
+    hold_bonus_amount: number
+    net_bonus: number
+  }>
+}
 
 interface SalesRepSummaryIn {
   sales_rep: string
@@ -114,6 +153,8 @@ interface SalesRepSummaryIn {
   target?: number
   bonus_rate?: number
   total_bonus_quarter?: number
+  payment_received_total?: number
+  hold_bonus_total?: number
   employee_salary?: number
   coefficient?: number
   is_pnl_overridden?: boolean
@@ -124,6 +165,12 @@ interface SalesRepSummaryIn {
   remark?: string
   bonus_rules?: any[]
   uses_progressive_bonus?: boolean
+  monthly_payouts?: Array<{
+    payout_period: string
+    amount: number
+    base_amount?: number
+    released_amount?: number
+  }>
 }
 
 interface SavedPeriod {
@@ -136,6 +183,32 @@ interface SavedPeriod {
   source_filename?: string | null
   from_date?: string | null
   till_date?: string | null
+  payout_periods?: string[]
+}
+
+interface PendingCommissionImport {
+  fileName: string
+  rows: JobPnLRow[]
+  periodLabel: string
+  fromDate: string
+  tillDate: string
+  periodParseError: string | null
+}
+
+interface CommissionMergeManualJob {
+  jobId: number
+  jobNo: string
+  salesRep: string | null
+  reasons: string[]
+  sourceFilename: string
+  periodId: number
+  periodLabel: string
+}
+
+interface CommissionMergePreviewSummary {
+  newJobs: number
+  automaticUpdates: number
+  manualJobs: CommissionMergeManualJob[]
 }
 
 interface CommissionWalletSummary {
@@ -146,9 +219,27 @@ interface CommissionWalletSummary {
     period_label: string
     payout_periods?: string[]
     total_bonus_quarter: number
+    formula_total_bonus_quarter?: number
+    formula_effective_coefficient?: number
+    formula_monthly_bonus?: number
+    payment_received_total?: number
+    gross_total_bonus_quarter?: number
+    hold_adjusted_total_bonus?: number
+    cash_basis_coefficient?: number
+    cash_basis_monthly_bonus?: number
     monthly_bonus: number
+    policy_hold_amount?: number
     quarter_hold_amount?: number
-    monthly_available_amounts?: Array<{ payout_period: string; amount: number }>
+    holds_entire_profit?: boolean
+    monthly_payout?: number
+    temporary_bonus_opening?: number
+    temporary_bonus_available?: number
+    monthly_available_amounts?: Array<{
+      payout_period: string
+      amount: number
+      base_amount?: number
+      released_amount?: number
+    }>
   }>
   total_bonus_quarter?: number
   total_earned: number
@@ -176,6 +267,7 @@ interface Props {
   apiBase: string
   token: string | null
   notificationFocus?: CommissionNotificationFocus | null
+  externalRefreshVersion?: number
 }
 
 // ══════════════════════════════════════════════════════════
@@ -184,9 +276,68 @@ interface Props {
 function fmtNum(v: number, decimals = 0) {
   return formatVietnameseNumber(v, { maximumFractionDigits: decimals })
 }
+
+function fmtBonusCoefficient(value: number, decimals = 2) {
+  return `${fmtNum(Math.max(0, Number(value || 0)) * 100, decimals)}%`
+}
+
+function getBonusReferenceLevel(profitLoss: number, employeeSalary: number) {
+  const salary = Number(employeeSalary || 0)
+  const profitSale = Math.max(0, Number(profitLoss || 0)) * 0.95
+  return salary > 0 ? profitSale / salary : 0
+}
+
+function fmtBonusReferenceLevel(value: number) {
+  const level = Math.max(0, Number(value || 0))
+  return level > 8 ? '> 8' : level.toFixed(2)
+}
+
+const HOLD_30_HELP = [
+  'Công thức Hold 30%:',
+  'Số tiền giữ = max(0, Profit/Loss JOB) × 30%',
+  'Áp dụng cho mọi JOB có hoặc chưa có dữ liệu công nợ.',
+  'Tỷ lệ cố định và không được chỉnh sửa thủ công.',
+].join('\n')
+
+function hold30CellHelp(row: JobPnLRow): string {
+  const jobNo = String(row.jobNo || '—')
+  const profitLoss = Math.max(0, Number(row.profitLoss || 0))
+  const amount = Number(row.holdBonusAmount ?? Math.round(profitLoss * 30) / 100)
+  return [
+    `JOB ${jobNo}`,
+    `Profit/Loss dương: ${fmtNum(profitLoss, 2)}`,
+    'Tỷ lệ Hold: 30%',
+    `Phép tính: ${fmtNum(profitLoss, 2)} × 30% = ${fmtNum(amount, 2)}`,
+    'Áp dụng kể cả khi JOB chưa có dữ liệu công nợ.',
+    'Không được phép chỉnh sửa thủ công.',
+  ].join('\n')
+}
+
 function fmtDate(iso: string | null) {
   if (!iso) return '—'
   try { return new Date(iso).toLocaleDateString('vi-VN') } catch { return iso }
+}
+
+function commissionQuarterLabel(fromDate?: string | null, tillDate?: string | null) {
+  const source = tillDate || fromDate
+  if (!source) return 'Chưa xác định kỳ'
+  const match = source.match(/^(\d{4})-(\d{2})/)
+  if (!match) return 'Chưa xác định kỳ'
+  const year = Number(match[1])
+  const month = Number(match[2])
+  if (!year || month < 1 || month > 12) return 'Chưa xác định kỳ'
+  return `Kỳ ${Math.ceil(month / 3)}/${year}`
+}
+
+function payoutPeriodLabel(value: string) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})$/)
+  return match ? `Tháng ${match[2]}/${match[1]}` : value || 'Chưa xác định tháng'
+}
+
+function fmtFileSize(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function findHeaderRowIndex(rows: any[][]): number {
@@ -429,11 +580,11 @@ function parseClimaxBuffer(buffer: ArrayBuffer): {
   return { rows, periodLabel, fromDate, tillDate, periodError }
 }
 
-function calculateDynamicSalesBonusJS(grossProfit: number, employeeSalary: number, rules: any[]) {
-  const netProfit = grossProfit * 0.95;
+function calculateDynamicSalesBonusJS(grossProfit: number, employeeSalary: number, rules: any[], targetOverride?: number) {
+  const profitLoss = Number(grossProfit || 0) * 0.95;
   if (employeeSalary <= 0) {
     return {
-      target: 0,
+      target: targetOverride === undefined ? 0 : Math.max(0, targetOverride),
       bonusRate: 0,
       totalBonusQuarter: 0,
       bonusPerMonth: 0,
@@ -453,10 +604,8 @@ function calculateDynamicSalesBonusJS(grossProfit: number, employeeSalary: numbe
   const sortedRules = [...activeRules].sort((a, b) => a.min - b.min);
   const baseCoef = sortedRules[0].max;
 
-  const target = employeeSalary * baseCoef;
-  const pfCountBn = netProfit - target;
-  
-  const coefficient = Math.round((netProfit / employeeSalary) * 100) / 100;
+  const target = targetOverride === undefined ? employeeSalary * baseCoef : Math.max(0, targetOverride);
+  const pfCountBn = profitLoss - target;
   
   let totalBonusQuarter = 0;
   let effectiveRate = 0;
@@ -496,7 +645,7 @@ function calculateDynamicSalesBonusJS(grossProfit: number, employeeSalary: numbe
     bonusRate: effectiveRate,
     totalBonusQuarter,
     bonusPerMonth,
-    coefficient
+    coefficient: employeeSalary > 0 && pfCountBn > 0 ? Math.round((profitLoss / employeeSalary) * 100) / 100 : 0
   };
 }
 
@@ -505,35 +654,32 @@ function calculateEmployeeBonusJS(
   employeeSalary: number,
   rules: any[],
   usesProgressiveBonus: boolean,
+  targetOverride?: number,
 ) {
   if (usesProgressiveBonus) {
-    return calculateDynamicSalesBonusJS(grossProfit, employeeSalary, rules)
+    return calculateDynamicSalesBonusJS(grossProfit, employeeSalary, rules, targetOverride)
   }
 
-  const netProfit = grossProfit * 0.95
-  const totalBonusQuarter = Math.max(netProfit, 0) * 0.20
+  const profitLoss = Number(grossProfit || 0) * 0.95
+  const target = targetOverride === undefined ? Math.max(0, employeeSalary * 2) : Math.max(0, targetOverride)
+  const eligibleProfit = Math.max(0, profitLoss - target)
+  const coefficient = eligibleProfit > 0 ? 0.20 : 0
+  const totalBonusQuarter = eligibleProfit * coefficient
   return {
-    target: 0,
-    bonusRate: 0.20,
+    target,
+    bonusRate: coefficient,
     totalBonusQuarter,
     bonusPerMonth: totalBonusQuarter / 3,
-    coefficient: employeeSalary > 0
-      ? Math.round((netProfit / employeeSalary) * 100) / 100
-      : 0,
+    coefficient: employeeSalary > 0 && eligibleProfit > 0 ? Math.round((profitLoss / employeeSalary) * 100) / 100 : 0,
   }
-}
-
-function getLevelName(level: number): string {
-  if (level <= 2) return 'Cấp 1';
-  if (level <= 4) return 'Cấp 2';
-  if (level <= 6) return 'Cấp 3';
-  if (level <= 8) return 'Cấp 4';
-  return 'Cấp 5';
 }
 
 type HistoryFlatRow = {
   periodId: number
   periodLabel: string
+  fromDate?: string | null
+  tillDate?: string | null
+  payoutPeriods: string[]
   createdAt: string
   totalPeriodPnL: number
   jobCount: number
@@ -544,6 +690,8 @@ type HistoryFlatRow = {
   repTarget: number
   repRate: number
   repTotalBonus: number
+  repPaymentReceivedTotal: number
+  repHoldBonusTotal: number
   repCoefficient: number
   isFirstRep: boolean
   repCount: boolean | number
@@ -557,6 +705,12 @@ type HistoryFlatRow = {
   remark: string
   repBonusRules: any[]
   usesProgressiveBonus: boolean
+  repMonthlyPayouts: Array<{
+    payout_period: string
+    amount: number
+    base_amount?: number
+    released_amount?: number
+  }>
 }
 
 type EditDraftState = {
@@ -580,11 +734,11 @@ function recalculateDraft(
   },
   row: HistoryFlatRow
 ): EditDraftState {
-  const netProfit = currentManualChecked.repPnL
+  const profitLoss = currentManualChecked.repPnL
     ? parseVndInput(currentDraft.repPnL)
     : row.repPnL * 0.95;
 
-  const grossProfit = netProfit / 0.95;
+  const grossProfit = profitLoss / 0.95;
   const defaultCalc = calculateEmployeeBonusJS(
     grossProfit,
     row.employeeSalary,
@@ -596,9 +750,7 @@ function recalculateDraft(
     ? parseVndInput(currentDraft.repTarget)
     : defaultCalc.target;
 
-  const pfCountBn = row.usesProgressiveBonus
-    ? netProfit - target
-    : Math.max(netProfit, 0);
+  const pfCountBn = Math.max(0, profitLoss - target);
 
   let totalBonus = 0;
   let rate = 0;
@@ -615,6 +767,7 @@ function recalculateDraft(
       target > 0 ? target / (row.repBonusRules[0]?.max || 2) : row.employeeSalary,
       row.repBonusRules,
       row.usesProgressiveBonus,
+      target,
     );
     totalBonus = customCalc.totalBonusQuarter;
     rate = customCalc.bonusRate;
@@ -631,9 +784,15 @@ function recalculateDraft(
     monthlyBonus = totalBonus / 3;
   }
 
+  if (pfCountBn <= 0) {
+    rate = 0;
+    totalBonus = 0;
+    monthlyBonus = 0;
+  }
+
   return {
     ...currentDraft,
-    repPnL: currentManualChecked.repPnL ? currentDraft.repPnL : String(netProfit),
+    repPnL: currentManualChecked.repPnL ? currentDraft.repPnL : String(profitLoss),
     repTarget: currentManualChecked.repTarget ? currentDraft.repTarget : String(target),
     repRate: currentManualChecked.repRate ? currentDraft.repRate : String(Math.round(rate * 100)),
     repTotalBonus: currentManualChecked.repTotalBonus ? currentDraft.repTotalBonus : String(totalBonus),
@@ -641,12 +800,89 @@ function recalculateDraft(
   };
 }
 
+function HistoryMonthFloatingTooltip({ ariaLabel, children }: { ariaLabel: string; children: ReactNode }) {
+  const triggerRef = useRef<HTMLSpanElement>(null)
+  const [position, setPosition] = useState<{ left: number; bottom: number; width: number } | null>(null)
+
+  function showTooltip() {
+    const trigger = triggerRef.current
+    if (!trigger) return
+    const rect = trigger.getBoundingClientRect()
+    const width = Math.min(350, Math.max(240, window.innerWidth - 24))
+    const halfWidth = width / 2
+    setPosition({
+      left: Math.min(window.innerWidth - halfWidth - 12, Math.max(halfWidth + 12, rect.left + rect.width / 2)),
+      bottom: Math.max(12, window.innerHeight - rect.top + 9),
+      width,
+    })
+  }
+
+  useEffect(() => {
+    if (!position) return
+    const closeTooltip = () => setPosition(null)
+    window.addEventListener('resize', closeTooltip)
+    window.addEventListener('scroll', closeTooltip, true)
+    return () => {
+      window.removeEventListener('resize', closeTooltip)
+      window.removeEventListener('scroll', closeTooltip, true)
+    }
+  }, [position])
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        className="commission-tooltip-icon"
+        tabIndex={0}
+        role="button"
+        aria-label={ariaLabel}
+        aria-expanded={!!position}
+        onMouseEnter={showTooltip}
+        onMouseLeave={() => setPosition(null)}
+        onFocus={showTooltip}
+        onBlur={() => setPosition(null)}
+        onClick={() => position ? setPosition(null) : showTooltip()}
+      >?</span>
+      {position && createPortal(
+        <div
+          role="tooltip"
+          style={{
+            position: 'fixed',
+            left: position.left,
+            bottom: position.bottom,
+            transform: 'translateX(-50%)',
+            zIndex: 10000,
+            width: position.width,
+            maxHeight: 'min(420px, calc(100vh - 24px))',
+            overflowY: 'auto',
+            background: '#1e293b',
+            color: '#fff',
+            textAlign: 'left',
+            padding: '12px 14px',
+            borderRadius: 8,
+            fontSize: 11,
+            fontWeight: 500,
+            lineHeight: 1.5,
+            whiteSpace: 'normal',
+            boxShadow: '0 10px 24px rgba(0,0,0,.38)',
+          }}
+        >
+          {children}
+          <span aria-hidden="true" style={{ position: 'absolute', top: '100%', left: '50%', marginLeft: -6, borderWidth: 6, borderStyle: 'solid', borderColor: '#1e293b transparent transparent transparent' }} />
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
 // ══════════════════════════════════════════════════════════
 // Main Component
 // ══════════════════════════════════════════════════════════
-export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
+export function CommissionTab({ apiBase, token, notificationFocus, externalRefreshVersion = 0 }: Props) {
   const confirm = useConfirmDialog()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const receivableFileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Import state ──────────────────────────────────────
   const [step, setStep] = useState<'idle' | 'preview' | 'saving' | 'done' | 'detail'>('idle')
@@ -662,6 +898,8 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
   const [fromDate, setFromDate] = useState('')
   const [tillDate, setTillDate] = useState('')
   const [periodParseError, setPeriodParseError] = useState<string | null>(null)
+  const [pendingImports, setPendingImports] = useState<PendingCommissionImport[]>([])
+  const [activeImportIndex, setActiveImportIndex] = useState(0)
 
   // ── Detail state ──────────────────────────────────────
   const [detailPeriodLabel, setDetailPeriodLabel] = useState('')
@@ -669,7 +907,14 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
   const [detailSalesRep, setDetailSalesRep] = useState('')
   const [detailFileName, setDetailFileName] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [detailJobTab, setDetailJobTab] = useState<DetailJobTab>('source')
   const [manualJobEditorOpen, setManualJobEditorOpen] = useState(false)
+  const [receivableOpen, setReceivableOpen] = useState(false)
+  const [receivableJob, setReceivableJob] = useState<JobPnLRow | null>(null)
+  const [receivableAttachments, setReceivableAttachments] = useState<CommissionReceivableAttachment[]>([])
+  const [receivableNote, setReceivableNote] = useState('')
+  const [receivableLoading, setReceivableLoading] = useState(false)
+  const [selectedReceivableJobIds, setSelectedReceivableJobIds] = useState<Set<number>>(new Set())
   const detailCloseButtonRef = useRef<HTMLButtonElement>(null)
   const detailReturnFocusRef = useRef<HTMLElement | null>(null)
 
@@ -679,6 +924,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
   const [wallets, setWallets] = useState<CommissionWalletSummary[]>([])
   const [, setWalletLoading] = useState(false)
   const [walletFocus, setWalletFocus] = useState<CommissionNotificationFocus | null>(null)
+  const [commissionRefreshVersion, setCommissionRefreshVersion] = useState(0)
 
   // ── Edit overrides state ──────────────────────────────
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null) // periodId-salesRep
@@ -713,28 +959,35 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
   const [overlapWarningData, setOverlapWarningData] = useState<{
     conflicts: Array<{ id: number, label: string, from: string, till: string, isExact: boolean }>
     onConfirm: () => void
-    onUpdate?: (periodId: number) => void
+    mergePreview?: CommissionMergePreviewSummary
+    selectedManualJobIds: number[]
+    onMerge?: (manualJobIds: number[]) => void
   } | null>(null)
 
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
 
-  async function loadHistory() {
-    setLoadingHistory(true)
+  async function loadHistory(showLoading = true) {
+    if (showLoading) setLoadingHistory(true)
     try {
       const res = await credentialedFetch(`${apiBase}/api/commission/periods`, { headers: authHeader })
       if (res.ok) setSavedPeriods(await res.json())
-    } catch { /* ignore */ } finally { setLoadingHistory(false) }
+    } catch { /* ignore */ } finally { if (showLoading) setLoadingHistory(false) }
   }
 
-  async function loadWallet() {
-    setWalletLoading(true)
+  async function loadWallet(showLoading = true) {
+    if (showLoading) setWalletLoading(true)
     try {
       // Lịch sử import có thể chứa nhiều nhân viên và nhiều kỳ. Luôn tải toàn bộ
       // ví để cột "Đang giữ" được ghép đúng theo từng sales + period, không lấy
       // nhầm số tổng hợp của kỳ đang được focus.
       const res = await credentialedFetch(`${apiBase}/api/commission/wallet`, { headers: authHeader })
       if (res.ok) setWallets(await res.json())
-    } finally { setWalletLoading(false) }
+    } finally { if (showLoading) setWalletLoading(false) }
+  }
+
+  async function refreshCommissionViews(refreshFunnel = true, showLoading = true) {
+    await Promise.all([loadHistory(showLoading), loadWallet(showLoading)])
+    if (refreshFunnel) setCommissionRefreshVersion(version => version + 1)
   }
 
   function focusWalletFromHistory(row: { periodId: number; periodLabel: string; salesRep: string }) {
@@ -753,8 +1006,8 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Không thể đồng bộ ví thưởng.')
+      await refreshCommissionViews()
       setSuccessMsg(data.message)
-      await loadWallet()
     } catch (err: any) { setError(err.message) } finally { setWalletLoading(false) }
   }
 
@@ -781,6 +1034,11 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
   }, [apiBase, token])
 
   useEffect(() => {
+    if (!token || externalRefreshVersion <= 0) return
+    void refreshCommissionViews()
+  }, [externalRefreshVersion])
+
+  useEffect(() => {
     if (!notificationFocus || !token) return
     setStep('idle')
     setWalletFocus(notificationFocus)
@@ -797,7 +1055,8 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
     if (!manualJobEditorOpen) detailCloseButtonRef.current?.focus()
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
-      if (manualJobEditorOpen) setManualJobEditorOpen(false)
+      if (receivableOpen) closeReceivableModal()
+      else if (manualJobEditorOpen) setManualJobEditorOpen(false)
       else closeDetailModal()
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -805,7 +1064,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [detailOpen, manualJobEditorOpen])
+  }, [detailOpen, manualJobEditorOpen, receivableOpen])
 
   async function deleteSalesRepCommission(id: number, label: string, salesRep: string) {
     if (!await confirm({ title: 'Xóa commission nhân viên', message: `Chỉ xóa JOB, commission và phễu thưởng của ${salesRep} trong kỳ "${label}". Các nhân viên commission khác không bị ảnh hưởng.`, confirmLabel: 'Xóa nhân viên này', tone: 'danger' })) return
@@ -815,8 +1074,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Không thể xóa commission của nhân viên.')
-      await loadHistory()
-      await loadWallet()
+      await refreshCommissionViews()
       setSuccessMsg(data.message)
     } catch (err: any) { setError(err.message) }
   }
@@ -843,12 +1101,12 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Lỗi khi lưu chỉnh sửa.')
       
-      setSuccessMsg(data.message || '✅ Đã lưu chỉnh sửa thành công.')
       setEditingRowKey(null)
       setEditDraft(null)
-      await loadHistory()
+      await syncWallet(periodId)
+      setSuccessMsg(data.message || 'Đã lưu chỉnh sửa thành công.')
     } catch (err: any) {
-      setError(`❌ Lỗi: ${err.message}`)
+      setError(`Lỗi: ${err.message}`)
     } finally {
       setIsLoading(false)
     }
@@ -876,11 +1134,11 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Lỗi khi lưu ghi chú.')
       
-      setSuccessMsg(`✅ Đã lưu ghi chú cho ${row.salesRep} thành công.`)
+      setSuccessMsg(`Đã lưu ghi chú cho ${row.salesRep} thành công.`)
       setRemarkModalData(null)
       await loadHistory()
     } catch (err: any) {
-      setError(`❌ Lỗi: ${err.message}`)
+      setError(`Lỗi: ${err.message}`)
     } finally {
       setIsLoading(false)
     }
@@ -898,39 +1156,95 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
   }
 
   // ── File handling ─────────────────────────────────────
-  function handleFile(file: File) {
-    if (!file.name.match(/\.(xlsx|xls)$/i)) {
-      setError('❌ Chỉ chấp nhận file Excel (.xlsx/.xls) từ Climax.'); return
+  function applyPendingImport(item: PendingCommissionImport, index: number) {
+    setActiveImportIndex(index)
+    setRows(item.rows)
+    setFileName(item.fileName)
+    setPeriodLabel(item.periodLabel)
+    setFromDate(item.fromDate)
+    setTillDate(item.tillDate)
+    setPeriodParseError(item.periodParseError)
+  }
+
+  function importsWithActiveEdits(): PendingCommissionImport[] {
+    if (pendingImports.length === 0) {
+      return fileName ? [{ fileName, rows, periodLabel, fromDate, tillDate, periodParseError }] : []
     }
-    setIsLoading(true); setError(null); setSuccessMsg(null)
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const buf = e.target?.result as ArrayBuffer
-        const { rows: parsed, periodLabel: pl, fromDate: fd, tillDate: td, periodError } = parseClimaxBuffer(buf)
-        if (parsed.length === 0) {
-          setError('⚠️ Không tìm thấy dữ liệu. Vui lòng kiểm tra định dạng file.')
-          setIsLoading(false); return
+    return pendingImports.map((item, index) => index === activeImportIndex
+      ? { ...item, rows, periodLabel, fromDate, tillDate, periodParseError }
+      : item)
+  }
+
+  function selectPendingImport(index: number) {
+    const updated = importsWithActiveEdits()
+    const selected = updated[index]
+    if (!selected) return
+    setPendingImports(updated)
+    applyPendingImport(selected, index)
+  }
+
+  async function handleFiles(fileList: FileList | File[]) {
+    const selected = Array.from(fileList)
+    if (selected.length === 0) return
+    if (selected.length > 50) {
+      setError('Mỗi lần chỉ được chọn tối đa 50 file Excel.')
+      return
+    }
+
+    const excelFiles = selected.filter(file => /\.(xlsx|xls)$/i.test(file.name))
+    const rejectedNames = selected.filter(file => !/\.(xlsx|xls)$/i.test(file.name)).map(file => file.name)
+    setIsLoading(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      const parsedResults = await Promise.all(excelFiles.map(async file => {
+        try {
+          const buf = await file.arrayBuffer()
+          const parsed = parseClimaxBuffer(buf)
+          if (parsed.rows.length === 0) throw new Error('không tìm thấy dữ liệu JOB')
+          return {
+            item: {
+              fileName: file.name,
+              rows: parsed.rows,
+              periodLabel: parsed.periodLabel,
+              fromDate: parsed.fromDate,
+              tillDate: parsed.tillDate,
+              periodParseError: parsed.periodError,
+            } satisfies PendingCommissionImport,
+          }
+        } catch (err: any) {
+          return { fileName: file.name, error: err?.message || 'không đọc được file' }
         }
-        setRows(parsed); setFileName(file.name)
-        setPeriodLabel(pl); setFromDate(fd); setTillDate(td); setPeriodParseError(periodError)
-        if (periodError) setError(`⚠️ ${periodError}`)
-        setStep('preview')
-      } catch (err: any) {
-        setError(`❌ Lỗi đọc file: ${err.message}`)
-      } finally { setIsLoading(false) }
+      }))
+      const validImports = parsedResults.flatMap(result => 'item' in result && result.item ? [result.item] : [])
+      const parseErrors = parsedResults.flatMap(result => 'error' in result ? [`${result.fileName}: ${result.error}`] : [])
+      if (validImports.length === 0) {
+        const details = [...rejectedNames.map(name => `${name}: không phải file Excel`), ...parseErrors]
+        setError(details.length ? details.join(' · ') : 'Không tìm thấy file Excel hợp lệ.')
+        return
+      }
+
+      setPendingImports(validImports)
+      applyPendingImport(validImports[0], 0)
+      setStep('preview')
+      const skipped = [...rejectedNames.map(name => `${name}: không phải file Excel`), ...parseErrors]
+      const periodErrors = validImports.filter(item => item.periodParseError).map(item => `${item.fileName}: ${item.periodParseError}`)
+      if (skipped.length || periodErrors.length) {
+        setError([...skipped, ...periodErrors].join(' · '))
+      }
+    } finally {
+      setIsLoading(false)
     }
-    reader.readAsArrayBuffer(file)
   }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault(); setIsDragging(false)
     if (step === 'preview') return
-    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0])
+    if (e.dataTransfer.files.length) void handleFiles(e.dataTransfer.files)
   }
 
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files?.[0]) handleFile(e.target.files[0])
+    if (e.target.files?.length) void handleFiles(e.target.files)
     e.target.value = ''
   }
 
@@ -938,18 +1252,179 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
     setStep('idle'); setRows([]); setFileName(null)
     setPeriodLabel(''); setFromDate(''); setTillDate('')
     setPeriodParseError(null)
+    setPendingImports([]); setActiveImportIndex(0)
     setError(null); setSuccessMsg(null)
   }
 
   function closeDetailModal() {
+    closeReceivableModal()
     setManualJobEditorOpen(false)
     setDetailOpen(false)
     setRows([])
+    setSelectedReceivableJobIds(new Set())
+    setReceivableNote('')
     setDetailPeriodLabel('')
     setDetailPeriodId(null)
     setDetailSalesRep('')
     setDetailFileName(null)
+    setDetailJobTab('source')
     window.setTimeout(() => detailReturnFocusRef.current?.focus(), 0)
+  }
+
+  function closeReceivableModal() {
+    setReceivableOpen(false)
+    setReceivableJob(null)
+    setReceivableAttachments([])
+  }
+
+  async function fetchJobReceivables(job: JobPnLRow) {
+    if (detailPeriodId == null) return []
+    const jobId = Number(job.id)
+    const res = await credentialedFetch(
+      `${apiBase}/api/commission/periods/${detailPeriodId}/jobs/${jobId}/receivables`,
+      { headers: authHeader },
+    )
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'Không thể tải chi tiết công nợ của JOB.')
+    return data as CommissionReceivableAttachment[]
+  }
+
+  async function openReceivableModal(job: JobPnLRow) {
+    setReceivableLoading(true)
+    setError(null)
+    try {
+      const attachments = await fetchJobReceivables(job)
+      setReceivableJob(job)
+      setReceivableAttachments(attachments)
+      setReceivableOpen(true)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setReceivableLoading(false)
+    }
+  }
+
+  function chooseBulkReceivableFiles() {
+    if (!rows.length) {
+      setError('Không có JOB nào để đối chiếu công nợ.')
+      return
+    }
+    receivableFileInputRef.current?.click()
+  }
+
+  async function handleReceivableFiles(event: React.ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files || [])
+    event.target.value = ''
+    const selectedJobIds = selectedReceivableJobIds.size
+      ? Array.from(selectedReceivableJobIds)
+      : rows.map(row => Number(row.id)).filter(Number.isFinite)
+    if (!selectedFiles.length || !selectedJobIds.length || detailPeriodId == null) return
+    setReceivableLoading(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', selectedFiles[0])
+      formData.append('note', receivableNote.trim())
+      formData.append('job_ids', JSON.stringify(selectedJobIds))
+      const res = await credentialedFetch(
+        `${apiBase}/api/commission/periods/${detailPeriodId}/receivables/reconcile`,
+        { method: 'POST', headers: authHeader, body: formData },
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Không thể đối chiếu hồ sơ công nợ.')
+      const result = data as CommissionReceivableReconciliation
+      const updatesById = new Map(result.updates.map(update => [update.job_id, update]))
+      setRows(previous => previous.map(row => {
+        const update = updatesById.get(Number(row.id))
+        return update ? {
+          ...row,
+          paymentReceived: 'YES',
+          receivableAmount: update.receivable_amount,
+          balanceAmount: update.balance_amount,
+          paymentReceivedAmount: update.payment_received_amount,
+          holdBonusPercent: update.hold_bonus_percent,
+          holdBonusAmount: update.hold_bonus_amount,
+          receivableCount: Number(row.receivableCount || 0) + 1,
+        } : row
+      }))
+      setSelectedReceivableJobIds(new Set())
+      setReceivableNote('')
+      await refreshCommissionViews()
+      setSuccessMsg(`Đã đối chiếu ${result.matched_jobs} JOB, bỏ qua ${result.ignored_non_positive_rows} dòng Balance âm${result.unmatched_positive_jobs ? `; ${result.unmatched_positive_jobs} JOB Balance bằng 0 hoặc dương không thuộc SALE/kỳ đang xem` : ''}.`)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setReceivableLoading(false)
+    }
+  }
+
+  function toggleReceivableJob(jobId: number) {
+    setSelectedReceivableJobIds(previous => {
+      const next = new Set(previous)
+      if (next.has(jobId)) next.delete(jobId)
+      else next.add(jobId)
+      return next
+    })
+  }
+
+  async function downloadReceivable(attachment: CommissionReceivableAttachment) {
+    if (detailPeriodId == null || !receivableJob) return
+    setReceivableLoading(true)
+    try {
+      const res = await credentialedFetch(
+        `${apiBase}/api/commission/periods/${detailPeriodId}/jobs/${Number(receivableJob.id)}/receivables/${attachment.id}/file`,
+        { headers: authHeader },
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Không thể tải tệp công nợ.')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = attachment.original_filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setReceivableLoading(false)
+    }
+  }
+
+  async function deleteReceivable(attachment: CommissionReceivableAttachment) {
+    if (detailPeriodId == null || !receivableJob) return
+    if (!await confirm({
+      title: 'Xóa hồ sơ công nợ',
+      message: `Xóa tệp “${attachment.original_filename}” khỏi JOB ${String(receivableJob.jobNo || '')}?`,
+      confirmLabel: 'Xóa tệp',
+      tone: 'danger',
+    })) return
+    setReceivableLoading(true)
+    try {
+      const jobId = Number(receivableJob.id)
+      const res = await credentialedFetch(
+        `${apiBase}/api/commission/periods/${detailPeriodId}/jobs/${jobId}/receivables/${attachment.id}`,
+        { method: 'DELETE', headers: authHeader },
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Không thể xóa hồ sơ công nợ.')
+      }
+      const attachments = receivableAttachments.filter(item => item.id !== attachment.id)
+      setReceivableAttachments(attachments)
+      setRows(previous => previous.map(row => Number(row.id) === jobId
+        ? { ...row, receivableCount: attachments.length }
+        : row))
+      setSuccessMsg(`Đã xóa tệp công nợ ${attachment.original_filename}.`)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setReceivableLoading(false)
+    }
   }
 
   function openManualJobEditor() {
@@ -962,6 +1437,22 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       requestKey: Date.now(),
     })
     setManualJobEditorOpen(true)
+  }
+
+  async function closeManualJobEditorAndRefresh() {
+    setManualJobEditorOpen(false)
+    if (detailPeriodId == null) return
+    try {
+      let url = `${apiBase}/api/commission/periods/${detailPeriodId}/jobs`
+      if (detailSalesRep && detailSalesRep !== '—') url += `?sales_rep=${encodeURIComponent(detailSalesRep)}`
+      const res = await credentialedFetch(url, { headers: authHeader })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Không thể đồng bộ lại chi tiết JOB.')
+      setRows(data)
+      await refreshCommissionViews()
+    } catch (err: any) {
+      setError(err.message)
+    }
   }
 
   async function viewPeriodJobs(periodId: number, periodLabel: string, salesRep: string, sourceFilename: string | null) {
@@ -984,127 +1475,184 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       setDetailPeriodId(periodId);
       setDetailSalesRep(salesRep);
       setDetailFileName(sourceFilename);
+      setDetailJobTab('source');
+      setSelectedReceivableJobIds(new Set());
+      setReceivableNote('');
       setDetailOpen(true);
     } catch (err: any) {
-      setError(`❌ Lỗi: ${err.message}`);
+      setError(`Lỗi: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
   }
 
   // ── Save to DB ─────────────────────────────────────────
+  function buildImportPayloads(imports: PendingCommissionImport[]) {
+    return imports.map(item => ({
+      period_label: item.periodLabel,
+      from_date: item.fromDate || null,
+      till_date: item.tillDate || null,
+      source_filename: item.fileName,
+      jobs: item.rows.map(r => ({
+        job_no: String(r.jobNo),
+        job_date: r.jobDate ? String(r.jobDate) : null,
+        hbl: r.hbl || null, mbl: r.mbl || null,
+        customer: r.customer || null, vendor: r.vendor || null,
+        sales_rep: r.salesRep || null, shipper: r.shipper || null,
+        consignee: r.consignee || null, sub_type: r.subType || null,
+        container_string: r.containerString || null,
+        wt: Number(r.wt) || null, vol: Number(r.vol) || null,
+        carrier_booking_no: r.carrierBookingNo || null,
+        por: r.por || null, final_destination: r.finalDestination || null,
+        realized_revenue: Number(r.realizedRevenue),
+        unrealized_revenue: Number(r.unrealizedRevenue),
+        realized_cost: Number(r.realizedCost),
+        unrealized_cost: Number(r.unrealizedCost),
+        profit_loss: Number(r.profitLoss),
+        container_picked: r.containerPicked || null,
+        payment_received: r.paymentReceived || null,
+      })),
+    }))
+  }
+
   async function executeSave() {
     setStep('saving'); setError(null)
     try {
-      const payload = {
-        period_label: periodLabel,
-        from_date: fromDate || null,
-        till_date: tillDate || null,
-        source_filename: fileName,
-        jobs: rows.map(r => ({
-          job_no: String(r.jobNo),
-          job_date: r.jobDate ? String(r.jobDate) : null,
-          hbl: r.hbl || null, mbl: r.mbl || null,
-          customer: r.customer || null, vendor: r.vendor || null,
-          sales_rep: r.salesRep || null, shipper: r.shipper || null,
-          consignee: r.consignee || null, sub_type: r.subType || null,
-          container_string: r.containerString || null,
-          wt: Number(r.wt) || null, vol: Number(r.vol) || null,
-          carrier_booking_no: r.carrierBookingNo || null,
-          por: r.por || null, final_destination: r.finalDestination || null,
-          realized_revenue: Number(r.realizedRevenue),
-          unrealized_revenue: Number(r.unrealizedRevenue),
-          realized_cost: Number(r.realizedCost),
-          unrealized_cost: Number(r.unrealizedCost),
-          profit_loss: Number(r.profitLoss),
-          container_picked: r.containerPicked || null,
-          payment_received: r.paymentReceived || null,
-        })),
-      }
-      const res = await credentialedFetch(`${apiBase}/api/commission/import`, {
+      const imports = importsWithActiveEdits()
+      const payloads = buildImportPayloads(imports)
+      const isBatch = payloads.length > 1
+      const res = await credentialedFetch(`${apiBase}/api/commission/import${isBatch ? '/batch' : ''}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeader },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(isBatch ? { imports: payloads } : payloads[0]),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Lỗi khi lưu.')
-      setSuccessMsg(data.message || `✅ Đã lưu ${rows.length} jobs vào cơ sở dữ liệu.`)
+      const totalJobs = imports.reduce((sum, item) => sum + item.rows.length, 0)
+      setSuccessMsg(data.message || `Đã lưu ${imports.length} file với ${totalJobs} jobs vào cơ sở dữ liệu.`)
       setStep('done')
       await loadHistory()
-      await syncWallet(data.period_id)
+      await syncWallet(isBatch ? undefined : data.period_id)
     } catch (err: any) {
-      setError(`❌ ${err.message}`); setStep('preview')
+      setError(err.message); setStep('preview')
+    }
+  }
+
+  async function executeMerge(imports: PendingCommissionImport[], overwriteManualJobIds: number[]) {
+    setOverlapWarningData(null)
+    setStep('saving')
+    setError(null)
+    try {
+      const res = await credentialedFetch(`${apiBase}/api/commission/import/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader },
+        body: JSON.stringify({
+          imports: buildImportPayloads(imports),
+          overwrite_manual_job_ids: overwriteManualJobIds,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Không thể gộp dữ liệu Commission vào kỳ hiện tại.')
+      setSuccessMsg(data.message || 'Đã gộp dữ liệu Commission an toàn theo từng JOB.')
+      setStep('done')
+      await loadHistory()
+      const periodIds = Array.isArray(data.period_ids) ? data.period_ids : []
+      for (const periodId of periodIds) await syncWallet(Number(periodId))
+    } catch (err: any) {
+      setError(err.message)
+      setStep('preview')
     }
   }
 
   async function handleConfirmSave() {
-    const newStart = parseDateStringToDate(fromDate)
-    const newEnd = parseDateStringToDate(tillDate)
-
-    if (periodParseError || !newStart || !newEnd || newStart > newEnd) {
-      setError(`⚠️ ${periodParseError || 'Khoảng ngày nguồn chưa hợp lệ. Hãy kiểm tra tiêu đề “Job Date From … Till …” của file trước khi lưu.'}`)
+    const imports = importsWithActiveEdits()
+    const invalidImport = imports.find(item => {
+      const start = parseDateStringToDate(item.fromDate)
+      const end = parseDateStringToDate(item.tillDate)
+      return item.periodParseError || !start || !end || start > end
+    })
+    if (invalidImport) {
+      setError(`${invalidImport.fileName}: ${invalidImport.periodParseError || 'Khoảng ngày nguồn chưa hợp lệ. Hãy kiểm tra tiêu đề “Job Date From … Till …”.'}`)
       return
     }
 
-    if (newStart && newEnd) {
-      const conflicts = savedPeriods.filter(p => {
-        if (!p.from_date || !p.till_date) return false
-        const savedStart = parseDateStringToDate(p.from_date)
-        const savedEnd = parseDateStringToDate(p.till_date)
-        if (!savedStart || !savedEnd) return false
-        return doMonthsOverlap(newStart, newEnd, savedStart, savedEnd)
-      }).map(p => {
-        const savedStart = parseDateStringToDate(p.from_date || '')
-        const savedEnd = parseDateStringToDate(p.till_date || '')
-        const isExact = !!(
-          savedStart && savedEnd &&
-          savedStart.getFullYear() === newStart.getFullYear() &&
-          savedStart.getMonth() === newStart.getMonth() &&
-          savedStart.getDate() === newStart.getDate() &&
-          savedEnd.getFullYear() === newEnd.getFullYear() &&
-          savedEnd.getMonth() === newEnd.getMonth() &&
-          savedEnd.getDate() === newEnd.getDate()
-        )
-        return {
-          id: p.id,
-          label: p.period_label,
-          from: p.from_date || '',
-          till: p.till_date || '',
-          isExact
-        }
-      })
+    setPendingImports(imports)
+    const conflicts = imports.flatMap(item => {
+      const newStart = parseDateStringToDate(item.fromDate)!
+      const newEnd = parseDateStringToDate(item.tillDate)!
+      return savedPeriods.filter(p => {
+          if (!p.from_date || !p.till_date) return false
+          const savedStart = parseDateStringToDate(p.from_date)
+          const savedEnd = parseDateStringToDate(p.till_date)
+          return !!savedStart && !!savedEnd && doMonthsOverlap(newStart, newEnd, savedStart, savedEnd)
+        }).map(p => {
+          const savedStart = parseDateStringToDate(p.from_date || '')
+          const savedEnd = parseDateStringToDate(p.till_date || '')
+          const isExact = !!(savedStart && savedEnd && savedStart.getTime() === newStart.getTime() && savedEnd.getTime() === newEnd.getTime())
+          return { id: p.id, label: `${item.fileName} ↔ ${p.period_label}`, from: p.from_date || '', till: p.till_date || '', isExact }
+        })
+    })
 
-      if (conflicts.length > 0) {
-        setOverlapWarningData({
-          conflicts,
-          onConfirm: () => {
-            setOverlapWarningData(null)
-            executeSave()
-          },
-          onUpdate: async (periodId: number) => {
-            setOverlapWarningData(null)
-            setStep('saving')
-            setError(null)
-            try {
-              // Delete existing period first
-              const delRes = await credentialedFetch(`${apiBase}/api/commission/periods/${periodId}`, {
-                method: 'DELETE',
-                headers: authHeader,
-              })
-              if (!delRes.ok) {
-                const delData = await delRes.json()
-                throw new Error(delData.detail || 'Không thể xóa kỳ cũ để cập nhật.')
+    if (conflicts.length > 0) {
+      let mergePreview: CommissionMergePreviewSummary | undefined
+      const hasExactConflict = conflicts.some(conflict => conflict.isExact)
+      if (hasExactConflict) {
+        try {
+          const previewRes = await credentialedFetch(`${apiBase}/api/commission/import/merge-preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader },
+            body: JSON.stringify({ imports: buildImportPayloads(imports) }),
+          })
+          const previewData = await previewRes.json()
+          if (!previewRes.ok) throw new Error(previewData.detail || 'Không thể kiểm tra các JOB trùng.')
+
+          const manualById = new Map<number, CommissionMergeManualJob>()
+          let newJobs = 0
+          let automaticUpdates = 0
+          for (const preview of Array.isArray(previewData.imports) ? previewData.imports : []) {
+            newJobs += Number(preview.new_jobs) || 0
+            automaticUpdates += Number(preview.automatic_updates) || 0
+            for (const job of Array.isArray(preview.manual_jobs) ? preview.manual_jobs : []) {
+              const jobId = Number(job.job_id)
+              const sourceFilename = String(preview.source_filename || 'File đang tải lên')
+              const previous = manualById.get(jobId)
+              if (previous) {
+                if (!previous.sourceFilename.split('; ').includes(sourceFilename)) {
+                  previous.sourceFilename = `${previous.sourceFilename}; ${sourceFilename}`
+                }
+                continue
               }
-              // Save the new period
-              await executeSave()
-            } catch (err: any) {
-              setError(`❌ ${err.message}`)
-              setStep('preview')
+              manualById.set(jobId, {
+                jobId,
+                jobNo: String(job.job_no || '—'),
+                salesRep: job.sales_rep ? String(job.sales_rep) : null,
+                reasons: Array.isArray(job.reasons) ? job.reasons.map(String) : [],
+                sourceFilename,
+                periodId: Number(preview.period_id),
+                periodLabel: String(preview.period_label || ''),
+              })
             }
           }
-        })
-        return
+          mergePreview = { newJobs, automaticUpdates, manualJobs: Array.from(manualById.values()) }
+        } catch (err: any) {
+          setError(err.message)
+          return
+        }
       }
+
+      setOverlapWarningData({
+        conflicts,
+        mergePreview,
+        selectedManualJobIds: [],
+        onConfirm: () => {
+          setOverlapWarningData(null)
+          void executeSave()
+        },
+        onMerge: hasExactConflict
+          ? (manualJobIds: number[]) => { void executeMerge(imports, manualJobIds) }
+          : undefined,
+      })
+      return
     }
     await executeSave()
   }
@@ -1112,6 +1660,29 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
   // ── Computed totals ────────────────────────────────────
   const totalPnL = rows.reduce((s, r) => s + Number(r.profitLoss), 0)
   const totalRevRealized = rows.reduce((s, r) => s + Number(r.realizedRevenue), 0)
+  const detailRows = useMemo(() => {
+    if (detailJobTab === 'source') return rows
+    const paymentStatus = detailJobTab === 'payable' ? 'YES' : 'NO'
+    return rows.filter(row => String(row.paymentReceived || 'NO').trim().toUpperCase() === paymentStatus)
+  }, [detailJobTab, rows])
+  const detailJobIds = useMemo(() => detailRows.map(row => Number(row.id)), [detailRows])
+  const allDetailRowsSelected = detailJobIds.length > 0
+    && detailJobIds.every(jobId => selectedReceivableJobIds.has(jobId))
+  function toggleAllDetailReceivableJobs() {
+    setSelectedReceivableJobIds(previous => {
+      const next = new Set(previous)
+      if (allDetailRowsSelected) detailJobIds.forEach(jobId => next.delete(jobId))
+      else detailJobIds.forEach(jobId => next.add(jobId))
+      return next
+    })
+  }
+  const detailPayableCount = useMemo(
+    () => rows.filter(row => String(row.paymentReceived || 'NO').trim().toUpperCase() === 'YES').length,
+    [rows],
+  )
+  const detailHeldCount = rows.length - detailPayableCount
+  const detailTotalPnL = detailRows.reduce((sum, row) => sum + Number(row.profitLoss || 0), 0)
+  const detailTotalRevRealized = detailRows.reduce((sum, row) => sum + Number(row.realizedRevenue || 0), 0)
 
   // ── Flatten history rows ───────────────────────────────
   // Each period × sales_rep = one flat row
@@ -1122,6 +1693,9 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
     return reps.map((s, si) => ({
       periodId: p.id,
       periodLabel: p.period_label,
+      fromDate: p.from_date,
+      tillDate: p.till_date,
+      payoutPeriods: p.payout_periods || [],
       createdAt: p.created_at,
       totalPeriodPnL: p.total_profit_loss,
       jobCount: p.job_count,
@@ -1132,6 +1706,8 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       repTarget: s.target ?? 0,
       repRate: s.bonus_rate ?? 0,
       repTotalBonus: s.total_bonus_quarter ?? 0,
+      repPaymentReceivedTotal: s.payment_received_total ?? 0,
+      repHoldBonusTotal: s.hold_bonus_total ?? 0,
       repCoefficient: s.coefficient ?? 0,
       isFirstRep: si === 0,
       repCount: reps.length,
@@ -1145,22 +1721,74 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       remark: s.remark ?? '',
       repBonusRules: s.bonus_rules || [],
       usesProgressiveBonus: s.uses_progressive_bonus !== false,
+      repMonthlyPayouts: s.monthly_payouts || [],
     }))
   })
 
-  function getWalletPeriodView(row: Pick<HistoryFlatRow, 'periodId' | 'periodLabel' | 'salesRep'>) {
+  function getWalletPeriodView(row: HistoryFlatRow) {
     const wallet = wallets.find(item => item.sales_rep === row.salesRep && (
       item.period_summaries?.some(period => period.period_id === row.periodId) ||
       item.period_labels?.includes(row.periodLabel)
     ))
     const period = wallet?.period_summaries?.find(item => item.period_id === row.periodId)
+    const heldAmount = Number(period?.quarter_hold_amount ?? row.repHoldBonusTotal)
+    const paymentReceivedTotal = Number(period?.payment_received_total ?? period?.gross_total_bonus_quarter ?? row.repPaymentReceivedTotal)
+    const target = getTargetView(row)
+    const isAboveTarget = row.repPnL * 0.95 > target
+    const formulaTotalBonus = isAboveTarget
+      ? Number(period?.formula_total_bonus_quarter ?? row.repTotalBonus)
+      : 0
+    const formulaCoefficient = isAboveTarget
+      ? Number(period?.formula_effective_coefficient ?? row.repRate ?? row.repCoefficient ?? 0)
+      : 0
+    const formulaMonthlyBonus = isAboveTarget
+      ? Number(period?.formula_monthly_bonus ?? row.repBonus ?? formulaTotalBonus / 3)
+      : 0
+    const monthlyPayout = isAboveTarget
+      ? Number(period?.monthly_payout ?? Math.max(0, formulaMonthlyBonus - heldAmount))
+      : 0
+    const temporaryBonusAvailable = isAboveTarget
+      ? Number(period?.temporary_bonus_available ?? Math.max(0, formulaTotalBonus - monthlyPayout * 3))
+      : 0
     return {
-      heldAmount: Number(period?.quarter_hold_amount ?? 0),
+      heldAmount,
+      policyHoldAmount: Number(period?.policy_hold_amount ?? row.repHoldBonusTotal),
+      holdsEntireProfit: period?.holds_entire_profit ?? heldAmount >= row.repPnL * 0.95 - 0.005,
+      paymentReceivedTotal,
+      formulaTotalBonus,
+      formulaCoefficient,
+      formulaMonthlyBonus,
+      monthlyPayout,
+      temporaryBonusOpening: Number(period?.temporary_bonus_opening ?? Math.max(0, formulaTotalBonus - monthlyPayout * 3)),
+      temporaryBonusAvailable,
       monthlyAvailableAmounts: period?.monthly_available_amounts ?? [],
     }
   }
 
+  function getHistoryMonthlyPayouts(row: HistoryFlatRow) {
+    const cashView = getWalletPeriodView(row)
+    const backendRows = cashView.monthlyAvailableAmounts.length === 3
+      ? cashView.monthlyAvailableAmounts
+      : row.repMonthlyPayouts.length === 3
+        ? row.repMonthlyPayouts
+        : []
+    const periods = row.payoutPeriods.length === 3
+      ? row.payoutPeriods
+      : backendRows.map(item => item.payout_period)
+    return [0, 1, 2].map(index => ({
+      payout_period: backendRows[index]?.payout_period || periods[index] || '',
+      amount: Number(backendRows[index]?.amount ?? cashView.monthlyPayout ?? 0),
+      base_amount: Number(backendRows[index]?.base_amount ?? backendRows[index]?.amount ?? cashView.monthlyPayout ?? 0),
+      released_amount: Number(backendRows[index]?.released_amount ?? 0),
+    }))
+  }
+
+  function getTargetView(row: Pick<HistoryFlatRow, 'repTarget' | 'employeeSalary' | 'isTargetOverridden'>) {
+    return row.isTargetOverridden ? Number(row.repTarget || 0) : Math.max(0, Number(row.employeeSalary || 0) * 2)
+  }
+
   function renderExcelTooltip(row: HistoryFlatRow, idx: number) {
+    const cashView = getWalletPeriodView(row)
     const defaultRules = [
       { min: 0, max: 2.0, rate: 0.0 },
       { min: 2.01, max: 4.0, rate: 0.20 },
@@ -1176,21 +1804,20 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
     // The base coefficient is the max of the first tier (where rate is usually 0)
     const baseCoef = row.usesProgressiveBonus ? sortedRules[0].max : 0;
     
-    const target = row.usesProgressiveBonus && row.employeeSalary > 0
-      ? row.employeeSalary * baseCoef
-      : 0;
-    const netProfit = row.repPnL * 0.95;
-    const pfCountBn = row.usesProgressiveBonus ? netProfit - target : Math.max(netProfit, 0);
+    const target = getTargetView(row);
+    const profitLoss = row.repPnL * 0.95;
+    const pfCountBn = Math.max(0, profitLoss - target);
+    const referenceLevel = pfCountBn > 0 ? getBonusReferenceLevel(row.repPnL, row.employeeSalary) : 0;
     
     // Calculate progressive breakdown dynamically
     const tiers: any[] = [];
     
     if (!row.usesProgressiveBonus) {
       tiers.push({
-        name: '95% tổng Profit',
+        name: 'Profit vượt Target',
         rate: '20%',
-        amount: Math.max(netProfit, 0),
-        bonus: Math.max(netProfit, 0) * 0.20,
+        amount: pfCountBn,
+        bonus: pfCountBn * 0.20,
       });
     } else if (pfCountBn > 0) {
       let remaining = pfCountBn;
@@ -1248,49 +1875,63 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
         {/* Left Side: Calculations */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: '200px' }}>
           <strong style={{ fontSize: '11px', color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '2px', fontWeight: 700, letterSpacing: '0.02em' }}>
-            Chi tiết tính toán ({row.salesRep})
+            Chi tiết hệ số thưởng ({row.salesRep})
           </strong>
           
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', padding: '2px 0' }}>
-            <span style={{ color: '#34d399', fontWeight: 600 }}>Profit Sale:</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', padding: '2px 0' }}>
+            <span style={{ color: '#34d399', fontWeight: 600 }}>Tổng thưởng:</span>
             <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#34d399', fontSize: '11px' }}>
-              {fmtNum(netProfit)}
+              {fmtNum(cashView.formulaTotalBonus)}
             </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', padding: '8px 10px', backgroundColor: '#1e293b', borderRadius: '8px', gap: '6px', border: '1px solid #334155' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
               <span style={{ color: '#94a3b8', fontWeight: 500 }}>Salary:</span>
               <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#93c5fd' }}>
                 {fmtNum(row.employeeSalary)}
               </span>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
+              <span style={{ color: '#94a3b8', fontWeight: 500 }}>Profit/Loss gốc:</span>
+              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#34d399' }}>
+                {fmtNum(row.repPnL)}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
+              <span style={{ color: '#94a3b8', fontWeight: 500 }}>Profit Sale (95%):</span>
+              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#6ee7b7' }}>
+                {fmtNum(profitLoss)}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
               <span style={{ color: '#94a3b8', fontWeight: 500 }}>Target:</span>
               <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#fca5a5' }}>
                 {fmtNum(target)}
               </span>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px' }}>
-              <span style={{ color: '#94a3b8', fontWeight: 500 }}>PF_BN:</span>
-              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#c084fc' }}>
-                {fmtNum(Math.max(pfCountBn, 0))}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', borderTop: '1px solid #334155', paddingTop: '6px', marginTop: '2px' }}>
-              <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Bonus:</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderTop: '1px solid #334155', paddingTop: '6px', marginTop: '2px' }}>
+              <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Chênh lệch:</span>
               <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#38bdf8' }}>
-                {fmtNum(row.repTotalBonus)}
+                {fmtNum(pfCountBn)}
               </span>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px' }}>
-              <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Avg / Month:</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
+              <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Level tham chiếu:</span>
               <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#a78bfa' }}>
-                {fmtNum(row.repBonus)}
+                {fmtBonusReferenceLevel(referenceLevel)}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
+              <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Tỷ lệ thưởng hiệu dụng:</span>
+              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#93c5fd' }}>
+                {fmtBonusCoefficient(cashView.formulaCoefficient)}
               </span>
             </div>
           </div>
@@ -1300,9 +1941,9 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
         <div style={{ width: '250px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
           {/* Header Row */}
           <div style={{ display: 'flex', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '4px', alignItems: 'center' }}>
-            <div style={{ width: '45%', fontWeight: 700, color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>LEVEL RANGE</div>
-            <div style={{ width: '20%', fontWeight: 700, color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>% RATE</div>
-            <div style={{ width: '35%', fontWeight: 700, color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>BONUS</div>
+            <div style={{ width: '45%', fontWeight: 700, color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>THAM CHIẾU P/L CŨ</div>
+            <div style={{ width: '20%', fontWeight: 700, color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>% RATE</div>
+            <div style={{ width: '35%', fontWeight: 700, color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>BONUS</div>
           </div>
 
           {/* Rows (Dynamic Tiers) */}
@@ -1318,7 +1959,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                 fontWeight: isActive ? '700' : '400',
                 backgroundColor: isActive ? '#0f766e' : 'transparent',
                 boxShadow: isActive ? '0 2px 4px rgba(0,0,0,0.1)' : 'none',
-                fontSize: '9.5px'
+                fontSize: '11px'
               }}>
                 <div style={{ width: '45%', color: isActive ? '#ffffff' : '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {tier.name}
@@ -1340,16 +1981,16 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             borderTop: '1px solid #334155',
             fontWeight: '700',
             color: '#ffffff',
-            fontSize: '9.5px'
+            fontSize: '11px'
           }}>
             <div style={{ width: '45%', color: '#ffffff' }}>
-              {row.usesProgressiveBonus ? 'TOTAL LŨY TIẾN' : 'TOTAL CỐ ĐỊNH'}
+              TỔNG CÔNG THỨC CŨ
             </div>
             <div style={{ width: '20%', textAlign: 'center', color: '#6ee7b7' }}>
-              {(row.repRate * 100).toFixed(1)}%
+              {fmtBonusCoefficient(cashView.formulaCoefficient)}
             </div>
-            <div style={{ width: '35%', textAlign: 'right', color: '#fca5a5', fontFamily: 'monospace', fontSize: '10.5px' }}>
-              {row.repTotalBonus > 0 ? fmtNum(row.repTotalBonus) : '-'}
+            <div style={{ width: '35%', textAlign: 'right', color: '#fca5a5', fontFamily: 'monospace', fontSize: '11px' }}>
+              {cashView.formulaTotalBonus > 0 ? fmtNum(cashView.formulaTotalBonus) : '-'}
             </div>
           </div>
         </div>
@@ -1370,7 +2011,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
           vertical-align: middle;
         }
         .commission-tooltip-icon {
-          font-size: 10px;
+          font-size: 11px;
           color: #2563eb;
           display: inline-flex;
           align-items: center;
@@ -1381,7 +2022,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
           border: 1.5px solid #2563eb;
           background: #eff6ff;
           font-weight: 800;
-          font-family: Roboto, Arial, sans-serif;
+          font-family: Roboto, "Segoe UI", Arial, sans-serif;
           line-height: 1;
         }
         .commission-tooltip-text {
@@ -1435,6 +2076,30 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
         .commission-tooltip-container:hover .commission-tooltip-text {
           visibility: visible;
         }
+        .commission-tooltip-container:focus-within .commission-tooltip-text {
+          visibility: visible;
+        }
+        .commission-tooltip-container.commission-tooltip-value {
+          justify-content: flex-end;
+          gap: 5px;
+          margin-left: 0;
+        }
+        .commission-tooltip-container.commission-tooltip-value .commission-tooltip-icon {
+          width: 12px;
+          height: 12px;
+          font-size: 11px;
+          flex: 0 0 auto;
+        }
+        .commission-tooltip-text.tooltip-align-right {
+          left: auto;
+          right: -4px;
+          transform: none;
+        }
+        .commission-tooltip-text.tooltip-align-right::after {
+          left: auto;
+          right: 10px;
+          margin-left: 0;
+        }
         .commission-tooltip-matrix {
           width: 480px !important;
         }
@@ -1457,6 +2122,71 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
         }
         .commission-upload-section { order: 10; }
         .commission-history-section { order: 20; }
+        .commission-history-table th,
+        .commission-history-table td {
+          padding-left: 7px !important;
+          padding-right: 7px !important;
+          overflow-wrap: anywhere;
+        }
+        .commission-history-table .commission-history-period-cell {
+          overflow-wrap: normal;
+        }
+        .commission-history-table-shell {
+          width: 100%;
+          max-width: 100%;
+          overflow-x: auto;
+          overscroll-behavior-inline: contain;
+          scrollbar-gutter: stable;
+          scrollbar-width: thin;
+          scrollbar-color: #94a3b8 #e2e8f0;
+        }
+        .commission-history-table-shell::-webkit-scrollbar {
+          height: 10px;
+        }
+        .commission-history-table-shell::-webkit-scrollbar-track {
+          background: #e2e8f0;
+          border-radius: 999px;
+        }
+        .commission-history-table-shell::-webkit-scrollbar-thumb {
+          background: #94a3b8;
+          border: 2px solid #e2e8f0;
+          border-radius: 999px;
+        }
+        .commission-history-table {
+          min-width: 1450px;
+        }
+        .commission-history-scroll-hint {
+          display: none;
+        }
+        .commission-history-sticky-start,
+        .commission-history-sticky-end {
+          position: sticky;
+          z-index: 6;
+        }
+        .commission-history-sticky-start {
+          left: 0;
+          box-shadow: 5px 0 10px -8px rgba(15, 23, 42, .65);
+        }
+        .commission-history-sticky-end {
+          right: 0;
+          box-shadow: -5px 0 10px -8px rgba(15, 23, 42, .65);
+        }
+        thead .commission-history-sticky-start,
+        thead .commission-history-sticky-end {
+          z-index: 8;
+          background: #f1f5f9;
+        }
+        @media (max-width: 1539px) {
+          .commission-history-scroll-hint {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 0 0 7px;
+            color: #475569;
+            font-size: 11px;
+            font-weight: 650;
+          }
+        }
         .commission-funnel-section { order: 40; }
       `}</style>
 
@@ -1464,7 +2194,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#0f172a' }}>
-            📊 Commission &amp; Job PnL
+            <AppIcon name="chart" size={20} /> Commission &amp; Job PnL
           </h2>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
             Import báo cáo từ Climax · Xác nhận &amp; lưu vào cơ sở dữ liệu
@@ -1476,7 +2206,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             border: '1.5px solid #cbd5e1', background: '#f8fafc',
             color: '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer',
           }}>
-            {step === 'detail' ? '← Quay lại lịch sử' : '← Import file mới'}
+            <AppIcon name="arrow-left" size={15} /> {step === 'detail' ? 'Quay lại lịch sử' : 'Import file mới'}
           </button>
         )}
       </div>
@@ -1499,8 +2229,10 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             apiBase={apiBase}
             token={token}
             focus={walletFocus}
+            refreshVersion={commissionRefreshVersion}
+            onDataChanged={() => refreshCommissionViews(false, false)}
             jobEditorOpen={manualJobEditorOpen}
-            onJobEditorClose={() => setManualJobEditorOpen(false)}
+            onJobEditorClose={() => void closeManualJobEditorAndRefresh()}
           />
         </div>
       )}
@@ -1521,16 +2253,16 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             transition: 'all 0.2s ease',
           }}
         >
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleInputChange} />
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" multiple style={{ display: 'none' }} onChange={handleInputChange} />
           {isLoading
-            ? <div style={{ color: '#1d4ed8', fontSize: 14, fontWeight: 600 }}>⏳ Đang đọc file Excel...</div>
+            ? <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: '#1d4ed8', fontSize: 14, fontWeight: 600 }}><AppIcon name="refresh" size={18} className="animate-spin" /> Đang đọc file Excel...</div>
             : <>
-              <div style={{ fontSize: 48, marginBottom: 10 }}>{isDragging ? '📥' : '📤'}</div>
+              <AppIcon name={isDragging ? 'download' : 'upload'} size={48} style={{ margin: '0 auto 10px' }} />
               <div style={{ fontSize: 15, fontWeight: 700, color: '#1e40af', marginBottom: 6 }}>
-                {isDragging ? 'Thả file vào đây' : 'Kéo thả hoặc click để chọn file Excel'}
+                {isDragging ? 'Thả các file vào đây' : 'Kéo thả hoặc click để chọn nhiều file Excel'}
               </div>
               <div style={{ fontSize: 12, color: '#64748b' }}>
-                File <b>"Job PnL With Realize/Unrealize Detail"</b> (.xlsx/.xls) từ Climax
+                Chọn tối đa 50 file <b>"Job PnL With Realize/Unrealize Detail"</b> (.xlsx/.xls) từ Climax
               </div>
             </>
           }
@@ -1543,13 +2275,42 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       {(step === 'preview' || step === 'saving') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
+          {pendingImports.length > 1 && (
+            <div style={{ border: '1px solid #bfdbfe', borderRadius: 14, padding: '12px 14px', background: '#f8fbff' }}>
+              <div style={{ color: '#1e3a8a', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>
+                Đã chọn {pendingImports.length} file · Nhấp tên file để xem trước
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                {pendingImports.map((item, index) => (
+                  <button
+                    key={`${item.fileName}-${index}`}
+                    type="button"
+                    onClick={() => selectPendingImport(index)}
+                    disabled={step === 'saving'}
+                    style={{
+                      height: 32, padding: '0 11px', borderRadius: 8,
+                      border: index === activeImportIndex ? '1px solid #1d4ed8' : '1px solid #cbd5e1',
+                      background: index === activeImportIndex ? '#dbeafe' : '#ffffff',
+                      color: index === activeImportIndex ? '#1d4ed8' : '#475569',
+                      fontSize: 11, fontWeight: 700, cursor: step === 'saving' ? 'not-allowed' : 'pointer',
+                      maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                    title={item.fileName}
+                  >
+                    {index + 1}. {item.fileName} · {item.rows.length} JOB
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* File info banner */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
             background: 'linear-gradient(135deg,#eff6ff,#dbeafe)',
             border: '1px solid #93c5fd', borderRadius: 14, padding: '14px 18px',
           }}>
-            <span style={{ fontSize: 24 }}>📂</span>
+            <AppIcon name="folder" size={24} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: '#1e3a8a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {fileName}
@@ -1564,20 +2325,24 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             {/* KPIs inline */}
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <div style={{ background: totalPnL >= 0 ? 'linear-gradient(135deg,#065f46,#059669)' : 'linear-gradient(135deg,#991b1b,#dc2626)', borderRadius: 10, padding: '8px 14px', color: '#fff' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tổng P&L</div>
+                <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tổng P&L</div>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>{fmtNum(totalPnL)}</div>
               </div>
               <div style={{ background: 'linear-gradient(135deg,#1e3a5f,#1d4ed8)', borderRadius: 10, padding: '8px 14px', color: '#fff' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Realized Rev</div>
+                <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Realized Rev</div>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>{fmtNum(totalRevRealized)}</div>
               </div>
             </div>
             {/* Period label editable */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <label style={{ fontSize: 10, fontWeight: 700, color: '#000000', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nhãn kỳ</label>
+              <label style={{ fontSize: 11, fontWeight: 700, color: '#000000', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nhãn kỳ</label>
               <input
                 value={periodLabel}
-                onChange={(e) => setPeriodLabel(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setPeriodLabel(value)
+                  setPendingImports(previous => previous.map((item, index) => index === activeImportIndex ? { ...item, periodLabel: value } : item))
+                }}
                 style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: 12, fontWeight: 600, color: '#000000', background: 'white', outline: 'none', minWidth: 200 }}
               />
             </div>
@@ -1676,7 +2441,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
               height: 40, padding: '0 20px', borderRadius: 10,
               border: '1.5px solid #cbd5e1', background: '#fff',
               color: '#475569', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-            }}>✕ Hủy bỏ</button>
+            }}><AppIcon name="close" size={15} /> Hủy bỏ</button>
             <button onClick={handleConfirmSave} disabled={step === 'saving' || !!periodParseError || !fromDate || !tillDate} style={{
               height: 40, padding: '0 28px', borderRadius: 10,
               background: step === 'saving' || periodParseError || !fromDate || !tillDate ? '#94a3b8' : 'linear-gradient(135deg,#059669,#047857)',
@@ -1685,7 +2450,12 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
               boxShadow: step === 'saving' || periodParseError || !fromDate || !tillDate ? 'none' : '0 6px 20px rgba(5,150,105,0.4)',
               display: 'flex', alignItems: 'center', gap: 8,
             }}>
-              {step === 'saving' ? '⏳ Đang lưu...' : '✅ Xác nhận & Lưu vào Database'}
+              <AppIcon name={step === 'saving' ? 'refresh' : 'check'} size={16} className={step === 'saving' ? 'animate-spin' : ''} />
+              {step === 'saving'
+                ? `Đang lưu ${pendingImports.length > 1 ? `${pendingImports.length} file` : ''}...`
+                : pendingImports.length > 1
+                  ? `Xác nhận & Lưu ${pendingImports.length} file`
+                  : 'Xác nhận & Lưu vào Database'}
             </button>
           </div>
         </div>
@@ -1694,6 +2464,13 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       {/* ════════════════════════════════════════════════
           STEP: DETAIL — Full 23-column detail view for a specific sales rep & period
       ════════════════════════════════════════════════ */}
+      <input
+        ref={receivableFileInputRef}
+        type="file"
+        hidden
+        accept=".xlsx"
+        onChange={handleReceivableFiles}
+      />
       {detailOpen && createPortal(
         <div
           className="ui-modal-backdrop"
@@ -1744,7 +2521,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                 onClick={closeDetailModal}
                 style={{ width: 38, minWidth: 38, height: 38, padding: 0, borderRadius: 10, fontSize: 22, lineHeight: 1 }}
               >
-                ×
+                <AppIcon name="close" size={17} />
               </button>
             </div>
 
@@ -1756,26 +2533,69 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             background: 'linear-gradient(135deg,#eff6ff,#dbeafe)',
             border: '1px solid #93c5fd', borderRadius: 14, padding: '14px 18px',
           }}>
-            <span style={{ fontSize: 24 }}>👤</span>
+            <AppIcon name="user" size={24} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 800, fontSize: 16, color: '#1e3a8a' }}>
                 Chi tiết công việc: {detailSalesRep}
               </div>
               <div style={{ fontSize: 13, color: '#3b82f6', marginTop: 4 }}>
-                Kỳ commission: <b>{detailPeriodLabel}</b> {detailFileName && `· File gốc: ${detailFileName}`} · <b>{rows.length} jobs</b>
+                Kỳ commission: <b>{detailPeriodLabel}</b> {detailFileName && `· File gốc: ${detailFileName}`} · <b>{detailRows.length} jobs</b>
               </div>
             </div>
             {/* KPIs inline */}
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <div style={{ background: totalPnL >= 0 ? 'linear-gradient(135deg,#065f46,#059669)' : 'linear-gradient(135deg,#991b1b,#dc2626)', borderRadius: 10, padding: '8px 14px', color: '#fff' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tổng P&L</div>
-                <div style={{ fontSize: 15, fontWeight: 800 }}>{fmtNum(totalPnL)}</div>
+              <div style={{ background: detailTotalPnL >= 0 ? 'linear-gradient(135deg,#065f46,#059669)' : 'linear-gradient(135deg,#991b1b,#dc2626)', borderRadius: 10, padding: '8px 14px', color: '#fff' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tổng P&L</div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>{fmtNum(detailTotalPnL)}</div>
               </div>
               <div style={{ background: 'linear-gradient(135deg,#1e3a5f,#1d4ed8)', borderRadius: 10, padding: '8px 14px', color: '#fff' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Realized Rev</div>
-                <div style={{ fontSize: 15, fontWeight: 800 }}>{fmtNum(totalRevRealized)}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Realized Rev</div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>{fmtNum(detailTotalRevRealized)}</div>
               </div>
             </div>
+          </div>
+
+          <div className="app-segmented-tabs commission-tablist commission-tablist--three" role="tablist" aria-label="Lọc dữ liệu JOB chi tiết">
+            <button type="button" className="app-segmented-tab" role="tab" aria-selected={detailJobTab === 'source'} onClick={() => setDetailJobTab('source')}>Data gốc <span>{rows.length}</span></button>
+            <button type="button" className="app-segmented-tab" role="tab" aria-selected={detailJobTab === 'payable'} onClick={() => setDetailJobTab('payable')}>Các JOB cần chi <span>{detailPayableCount}</span></button>
+            <button type="button" className="app-segmented-tab" role="tab" aria-selected={detailJobTab === 'held'} onClick={() => setDetailJobTab('held')}>Các JOB đang giữ <span>{detailHeldCount}</span></button>
+          </div>
+
+          <div style={{
+            display: 'flex', alignItems: 'end', gap: 12, flexWrap: 'wrap',
+            padding: '12px 14px', border: '1px solid #bae6fd', borderRadius: 12, background: '#f0f9ff',
+          }}>
+            <div style={{ minWidth: 190 }}>
+              <div style={{ color: '#0c4a6e', fontSize: 13, fontWeight: 800 }}>
+                Upload & đối chiếu công nợ
+              </div>
+              <div style={{ marginTop: 3, color: '#475569', fontSize: 11 }}>
+                Khớp tự động theo JOB NO · bỏ qua Balance âm, Balance = 0 ghi nhận đã trả đủ · {selectedReceivableJobIds.size ? `${selectedReceivableJobIds.size} JOB đã chọn` : `toàn bộ ${rows.length} JOB của SALE`}
+              </div>
+            </div>
+            <label style={{ flex: '1 1 360px', color: '#334155', fontSize: 11, fontWeight: 700 }}>
+              Ghi chú chung
+              <input
+                value={receivableNote}
+                onChange={event => setReceivableNote(event.target.value)}
+                maxLength={2000}
+                placeholder="Ví dụ: Đối chiếu công nợ tháng 08/2026..."
+                style={{
+                  display: 'block', width: '100%', height: 38, marginTop: 5,
+                  border: '1px solid #cbd5e1', borderRadius: 9, padding: '0 11px',
+                  color: '#0f172a', background: '#fff', font: 'inherit',
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="ui-button ui-button-primary"
+              onClick={chooseBulkReceivableFiles}
+              disabled={receivableLoading || rows.length === 0}
+              style={{ height: 38, padding: '0 16px' }}
+            >
+              <AppIcon name="upload" size={16} /> {receivableLoading ? 'Đang đối chiếu...' : 'Chọn file AGEING'}
+            </button>
           </div>
 
           {/* Bảng 23 cột */}
@@ -1783,12 +2603,25 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             <table style={{ borderCollapse: 'collapse', fontSize: 12, whiteSpace: 'nowrap' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                 <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                  <th style={{ padding: '8px', textAlign: 'center', minWidth: 42, borderRight: '1px solid #cbd5e1' }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Chọn tất cả JOB đang hiển thị"
+                      checked={allDetailRowsSelected}
+                      onChange={toggleAllDetailReceivableJobs}
+                    />
+                  </th>
                   <th style={{
                     padding: '10px 10px', textAlign: 'center',
                     fontWeight: 700, fontSize: 11, minWidth: 40,
                     borderRight: '1px solid #cbd5e1',
                     color: '#000000',
                   }}>#</th>
+                  <th style={{
+                    padding: '10px 10px', textAlign: 'center',
+                    fontWeight: 700, fontSize: 11, minWidth: 105,
+                    borderRight: '1px solid #cbd5e1', color: '#000000',
+                  }}>Công nợ</th>
                   {CLIMAX_COLUMNS.map(col => (
                     <th key={col.key} style={{
                       padding: '10px 12px', textAlign: col.num ? 'right' : 'left',
@@ -1799,14 +2632,64 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                       {col.label}
                     </th>
                   ))}
+                  <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, fontSize: 11, minWidth: 125, borderRight: '1px solid #cbd5e1', color: '#000' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%' }}>
+                      <span>Hold Bonus 30%</span>
+                      <span className="commission-tooltip-container" tabIndex={0} aria-label={`Hold 30 phần trăm Profit/Loss JOB. ${HOLD_30_HELP}`}>
+                        <span className="commission-tooltip-icon" aria-hidden="true">?</span>
+                        <div className="commission-tooltip-text tooltip-down tooltip-align-right" style={{ width: 290, padding: '12px 14px' }}>
+                          <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block', fontWeight: 700 }}>
+                            Công thức tính Hold 30%
+                          </strong>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 11, color: '#cbd5e1' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                              <span style={{ color: '#38bdf8', fontWeight: 700 }}>Công thức</span>
+                              <span style={{ fontFamily: 'monospace', textAlign: 'right' }}>Profit/Loss dương × 30%</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, borderTop: '1px solid #334155', paddingTop: 6 }}>
+                              <span style={{ color: '#34d399', fontWeight: 700 }}>Tỷ lệ cố định</span>
+                              <span style={{ fontFamily: 'monospace', textAlign: 'right', fontWeight: 700 }}>30%</span>
+                            </div>
+                            <div style={{ color: '#94a3b8', fontSize: 11, fontStyle: 'italic' }}>* Áp dụng cho cả JOB chưa có dữ liệu công nợ; không chỉnh sửa thủ công.</div>
+                          </div>
+                        </div>
+                      </span>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, idx) => {
+                {detailRows.map((r, idx) => {
                   const pnl = Number(r.profitLoss)
                   return (
-                    <tr key={idx} style={{ background: idx % 2 === 0 ? '#fff' : '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
+                    <tr key={Number(r.id)} style={{ background: idx % 2 === 0 ? '#fff' : '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
+                      <td style={{ padding: '7px 8px', textAlign: 'center', borderRight: '1px solid #cbd5e1' }}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Chọn JOB ${String(r.jobNo || '')} để upload công nợ`}
+                          checked={selectedReceivableJobIds.has(Number(r.id))}
+                          onChange={() => toggleReceivableJob(Number(r.id))}
+                        />
+                      </td>
                       <td style={{ padding: '7px 10px', textAlign: 'center', color: '#000000', fontSize: 11, borderRight: '1px solid #cbd5e1' }}>{idx + 1}</td>
+                      <td style={{ padding: '6px 8px', borderRight: '1px solid #cbd5e1' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => void openReceivableModal(r)}
+                            disabled={receivableLoading}
+                            title={`Xem chi tiết công nợ JOB ${String(r.jobNo || '')}`}
+                            style={{
+                              height: 30, padding: '0 9px', borderRadius: 7,
+                              border: '1px solid #cbd5e1', background: '#fff',
+                              color: '#334155', fontSize: 11, fontWeight: 700,
+                              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                            }}
+                          >
+                            <AppIcon name="document" size={13} /> Xem ({Number(r.receivableCount || 0)})
+                          </button>
+                        </div>
+                      </td>
                       {CLIMAX_COLUMNS.map(col => {
                         const v = r[col.key]
                         const isPnL = col.key === 'profitLoss'
@@ -1822,26 +2705,59 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }}>
-                            {col.num
-                              ? fmtNum(Number(v), col.key === 'wt' || col.key === 'vol' ? 3 : 0)
-                              : (v === null || v === undefined || v === '') ? '—' : String(v)
+                            {col.key === 'paymentReceived'
+                              ? String(v || 'NO').toUpperCase() === 'YES'
+                                ? <span style={{ color: '#047857', fontWeight: 800 }}>YES <small style={{ display: 'block', color: '#475569', fontWeight: 700 }}>Đã trả: {fmtNum(Number(r.paymentReceivedAmount || 0), 2)}</small></span>
+                                : <span style={{ color: '#b45309', fontWeight: 800 }}>NO</span>
+                              : col.num
+                                ? fmtNum(Number(v), col.key === 'wt' || col.key === 'vol' ? 3 : 0)
+                                : (v === null || v === undefined || v === '') ? '—' : String(v)
                             }
                           </td>
                         )
                       })}
+                      <td style={{ padding: '5px 8px', textAlign: 'right', borderRight: '1px solid #cbd5e1', background: '#fffbeb' }}>
+                          <span className="commission-tooltip-container commission-tooltip-value" aria-label={hold30CellHelp(r)}>
+                            <span style={{ color: '#92400e', fontWeight: 800 }}>{fmtNum(Number(r.holdBonusAmount ?? Math.round(Math.max(0, Number(r.profitLoss || 0)) * 30) / 100), 2)}</span>
+                            <span className="commission-tooltip-icon" tabIndex={0} aria-label={`Xem công thức Hold 30% của JOB ${String(r.jobNo || '—')}`}>?</span>
+                            <div className={`commission-tooltip-text tooltip-align-right ${idx < 2 ? 'tooltip-down' : 'tooltip-up'}`} style={{ width: 300, padding: '12px 14px' }}>
+                              <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block', fontWeight: 700 }}>
+                                Kiểm tra Hold 30% · {String(r.jobNo || '—')}
+                              </strong>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, color: '#cbd5e1' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                                  <span style={{ color: '#94a3b8' }}>Profit/Loss dương</span>
+                                  <span style={{ fontFamily: 'monospace', textAlign: 'right' }}>{fmtNum(Math.max(0, Number(r.profitLoss || 0)), 2)}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #334155', paddingTop: 6 }}>
+                                  <span style={{ color: '#34d399', fontWeight: 700 }}>Số tiền giữ</span>
+                                  <span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 800 }}>{fmtNum(Number(r.holdBonusAmount ?? Math.round(Math.max(0, Number(r.profitLoss || 0)) * 30) / 100), 2)}</span>
+                                </div>
+                                <div style={{ color: '#94a3b8', fontSize: 11, fontStyle: 'italic' }}>* Profit/Loss × 30%; áp dụng cả khi chưa có dữ liệu công nợ.</div>
+                              </div>
+                            </div>
+                          </span>
+                      </td>
                     </tr>
                   )
                 })}
+                {detailRows.length === 0 && (
+                  <tr><td colSpan={CLIMAX_COLUMNS.length + 4} style={{ padding: 28, textAlign: 'center', color: '#64748b' }}>Không có JOB phù hợp với tab đang chọn.</td></tr>
+                )}
                 {/* Totals row */}
                 <tr style={{ background: '#e2e8f0', fontWeight: 800, position: 'sticky', bottom: 0, borderTop: '2px solid #cbd5e1' }}>
+                  <td style={{ padding: '9px 8px', textAlign: 'center', color: '#334155', fontSize: 11 }}>{selectedReceivableJobIds.size}</td>
                   <td style={{ padding: '9px 10px', textAlign: 'center', color: '#000000', fontSize: 14, fontWeight: 900 }}>Σ</td>
+                  <td style={{ padding: '9px 10px', textAlign: 'center', color: '#334155', fontSize: 11 }}>
+                    {detailRows.reduce((sum, row) => sum + Number(row.receivableCount || 0), 0)} tệp
+                  </td>
                   {CLIMAX_COLUMNS.map(col => {
                     if (!col.num) return (
                       <td key={col.key} style={{ padding: '9px 12px', color: '#000000', fontSize: 12, fontWeight: 700 }}>
-                        {col.key === 'jobNo' ? `${rows.length} jobs` : ''}
+                        {col.key === 'jobNo' ? `${detailRows.length} jobs` : ''}
                       </td>
                     )
-                    const total = rows.reduce((s, r) => s + Number(r[col.key] ?? 0), 0)
+                    const total = detailRows.reduce((s, r) => s + Number(r[col.key] ?? 0), 0)
                     const isPnL = col.key === 'profitLoss'
                     return (
                       <td key={col.key} style={{
@@ -1853,6 +2769,18 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                       </td>
                     )
                   })}
+                  <td style={{ padding: '9px 12px', textAlign: 'right', color: '#92400e', fontSize: 12, fontWeight: 800 }}>
+                    <span className="commission-tooltip-container commission-tooltip-value">
+                      <span>{fmtNum(detailRows.reduce((sum, row) => sum + Number(row.holdBonusAmount ?? Math.round(Math.max(0, Number(row.profitLoss || 0)) * 30) / 100), 0), 2)}</span><span className="commission-tooltip-icon" tabIndex={0} aria-label="Giải thích tổng Hold 30 phần trăm">?</span>
+                      <div className="commission-tooltip-text tooltip-up tooltip-align-right" style={{ width: 270 }}>
+                        <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block' }}>Tổng tiền Hold 30%</strong>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#cbd5e1', fontSize: 11 }}>
+                          <span>Σ {detailRows.length} JOB đang hiển thị</span>
+                          <span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 800 }}>{fmtNum(detailRows.reduce((sum, row) => sum + Number(row.holdBonusAmount ?? Math.round(Math.max(0, Number(row.profitLoss || 0)) * 30) / 100), 0), 2)}</span>
+                        </div>
+                      </div>
+                    </span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -1864,7 +2792,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             padding: '2px 0 0',
           }}>
             <button type="button" onClick={openManualJobEditor} className="ui-button ui-button-primary" style={{ height: 40, padding: '0 20px' }}>
-              ✎ Sửa thủ công
+              <AppIcon name="edit" size={16} /> Sửa thủ công
             </button>
             <button type="button" onClick={closeDetailModal} style={{
               height: 40, padding: '0 24px', borderRadius: 10,
@@ -1880,6 +2808,128 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
         </div>
       , document.body)}
 
+      {receivableOpen && receivableJob && createPortal(
+        <div
+          className="ui-modal-backdrop"
+          role="presentation"
+          onMouseDown={closeReceivableModal}
+          style={{ zIndex: 3600, padding: 16 }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="commission-receivable-detail-title"
+            onMouseDown={event => event.stopPropagation()}
+            style={{
+              width: 'min(92vw, 920px)', maxHeight: 'min(88vh, 760px)',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              background: '#fff', border: '1px solid #cbd5e1', borderRadius: 18,
+              boxShadow: '0 30px 80px rgba(15,23,42,.4)',
+            }}
+          >
+            <header style={{
+              minHeight: 62, padding: '12px 16px 12px 20px', display: 'flex',
+              alignItems: 'center', justifyContent: 'space-between', gap: 16,
+              borderBottom: '1px solid #e2e8f0', background: '#f8fafc',
+            }}>
+              <div>
+                <div id="commission-receivable-detail-title" style={{ color: '#0f172a', fontSize: 17, fontWeight: 800 }}>
+                  Chi tiết công nợ JOB {String(receivableJob.jobNo || '')}
+                </div>
+                <div style={{ marginTop: 3, color: '#64748b', fontSize: 12 }}>
+                  SALE: <b>{String(receivableJob.salesRep || detailSalesRep || '—')}</b> · Kỳ: <b>{detailPeriodLabel}</b>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="app-close-button"
+                aria-label="Đóng chi tiết công nợ"
+                onClick={closeReceivableModal}
+                style={{ width: 38, minWidth: 38, height: 38, padding: 0, borderRadius: 10 }}
+              >
+                <AppIcon name="close" size={17} />
+              </button>
+            </header>
+
+            <div style={{ padding: 18, overflow: 'auto', display: 'grid', gap: 16 }}>
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))',
+                gap: 10, padding: 14, borderRadius: 14, border: '1px solid #bae6fd', background: '#f0f9ff',
+              }}>
+                {[
+                  ['Customer', receivableJob.customer],
+                  ['HBL/HAWB', receivableJob.hbl],
+                  ['MBL', receivableJob.mbl],
+                  ['Payment Received', receivableJob.paymentReceived],
+                ].map(([label, value]) => (
+                  <div key={String(label)}>
+                    <div style={{ color: '#64748b', fontSize: 11, fontWeight: 800, textTransform: 'uppercase' }}>{String(label)}</div>
+                    <div style={{ marginTop: 4, color: '#0f172a', fontSize: 13, fontWeight: 700, overflowWrap: 'anywhere' }}>
+                      {value === null || value === undefined || value === '' ? '—' : String(value)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <div style={{ marginBottom: 9, color: '#0f172a', fontSize: 14, fontWeight: 800 }}>
+                  Hồ sơ đã tải ({receivableAttachments.length})
+                </div>
+                {receivableAttachments.length === 0 ? (
+                  <div style={{ padding: 28, textAlign: 'center', color: '#64748b', border: '1px solid #e2e8f0', borderRadius: 14 }}>
+                    JOB này chưa có hồ sơ công nợ.
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {receivableAttachments.map(attachment => (
+                      <div key={attachment.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px',
+                        border: '1px solid #e2e8f0', borderRadius: 12, background: '#fff',
+                      }}>
+                        <div style={{
+                          width: 38, height: 38, borderRadius: 10, background: '#e0f2fe', color: '#0369a1',
+                          display: 'grid', placeItems: 'center', flex: '0 0 auto',
+                        }}><AppIcon name="document" size={19} /></div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: '#0f172a', fontSize: 13, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {attachment.original_filename}
+                          </div>
+                          <div style={{ marginTop: 3, color: '#64748b', fontSize: 11 }}>
+                            {fmtFileSize(attachment.size_bytes)} · {new Date(attachment.created_at).toLocaleString('vi-VN')}
+                            {attachment.uploaded_by ? ` · ${attachment.uploaded_by}` : ''}
+                          </div>
+                          {attachment.note && <div style={{ marginTop: 4, color: '#475569', fontSize: 12 }}>{attachment.note}</div>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void downloadReceivable(attachment)}
+                          disabled={receivableLoading}
+                          title="Tải tệp công nợ"
+                          style={{ height: 34, padding: '0 10px', border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff', color: '#334155', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700 }}
+                        ><AppIcon name="download" size={14} /> Tải</button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteReceivable(attachment)}
+                          disabled={receivableLoading}
+                          title="Xóa tệp công nợ"
+                          style={{ width: 34, height: 34, padding: 0, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', color: '#be123c', display: 'grid', placeItems: 'center' }}
+                        ><AppIcon name="trash" size={14} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <footer style={{ padding: '12px 18px', borderTop: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" className="ui-button ui-button-secondary" onClick={closeReceivableModal} style={{ height: 38, padding: '0 18px' }}>
+                Đóng chi tiết công nợ
+              </button>
+            </footer>
+          </section>
+        </div>
+      , document.body)}
+
       {/* ════════════════════════════════════════════════
 
       {/* ════════════════════════════════════════════════
@@ -1887,13 +2937,13 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       ════════════════════════════════════════════════ */}
       {step === 'done' && (
         <div style={{ textAlign: 'center', padding: '32px 20px', background: 'linear-gradient(135deg,#ecfdf5,#d1fae5)', borderRadius: 20, border: '1px solid #6ee7b7' }}>
-          <div style={{ fontSize: 48, marginBottom: 10 }}>🎉</div>
+          <AppIcon name="check" size={48} style={{ margin: '0 auto 10px' }} />
           <div style={{ fontSize: 16, fontWeight: 800, color: '#065f46', marginBottom: 14 }}>{successMsg}</div>
           <button onClick={resetImport} style={{
             height: 38, padding: '0 20px', borderRadius: 10,
             background: 'linear-gradient(135deg,#163b66,#1d4ed8)',
             border: 'none', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-          }}>📂 Import file mới</button>
+          }}><AppIcon name="folder" size={16} /> Import file mới</button>
         </div>
       )}
 
@@ -1901,70 +2951,99 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
       <div className="commission-history-section">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1e293b' }}>
-            🗂️ Lịch sử Import đã lưu
+            <AppIcon name="history" size={17} /> Lịch sử Import đã lưu
           </h3>
-          <button onClick={loadHistory} style={{
+          <button
+            type="button"
+            className="commission-icon-action commission-history-refresh"
+            aria-label="Làm mới lịch sử Import"
+            data-tooltip="Làm mới"
+            title="Làm mới lịch sử Import"
+            onClick={() => void loadHistory()}
+            style={{
             height: 32, padding: '0 14px', borderRadius: 8,
             border: '1.5px solid #e2e8f0', background: '#fff',
             color: '#64748b', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-          }}>🔄 Làm mới</button>
+          }}><AppIcon name="refresh" size={16} /></button>
         </div>
 
         {loadingHistory && (
-          <div style={{ color: '#94a3b8', fontSize: 13, padding: '12px 0' }}>⏳ Đang tải...</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#526979', fontSize: 13, padding: '12px 0' }}><AppIcon name="refresh" size={15} className="animate-spin" /> Đang tải...</div>
         )}
 
         {!loadingHistory && savedPeriods.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '28px 20px', background: '#f8fafc', borderRadius: 14, border: '1px dashed #cbd5e1', color: '#94a3b8', fontSize: 13 }}>
+          <div style={{ textAlign: 'center', padding: '28px 20px', background: '#f8fafc', borderRadius: 14, border: '1px dashed #cbd5e1', color: '#526979', fontSize: 13 }}>
             Chưa có dữ liệu commission nào được lưu.
           </div>
         )}
 
         {historyRows.length > 0 && (
-          <div style={{ border: '1px solid #cbd5e1', borderRadius: 14, overflow: 'visible' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <>
+          <div className="commission-history-scroll-hint" aria-hidden="true"><span>↔</span> Cuộn ngang để xem đủ ba tháng thưởng; cột Kỳ và Tác vụ luôn được giữ cố định.</div>
+          <div className="commission-history-table-shell" role="region" aria-label="Bảng lịch sử Import — có thể cuộn ngang trên màn hình nhỏ" tabIndex={0} style={{ border: '1px solid #cbd5e1', borderRadius: 14 }}>
+            <table className="commission-history-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 13 }}>
+              <colgroup>
+                {[126, 126, 52, 116, 96, 62, 108, 100, 100, 108, 108, 108, 82, 158].map((width, index) => <col key={index} style={{ width }} />)}
+              </colgroup>
               <thead>
                 <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
-                  {['KỲ', 'TÊN SALES REP', 'JOBS', 'TỔNG PROFIT / LOSS', 'TARGET', 'HỆ SỐ', 'TỔNG THƯỞNG', 'ĐANG GIỮ', 'THƯỞNG / THÁNG', 'NGÀY LƯU', 'TÁC VỤ'].map(h => {
+                  {['KỲ', 'SALE REP', 'JOBS', 'TỔNG PROFIT / LOSS', 'TARGET', 'HỆ SỐ', 'TỔNG THƯỞNG', 'ĐANG GIỮ', 'KHẢ DỤNG', 'THÁNG ĐẦU TIÊN', 'THÁNG THỨ HAI', 'THÁNG THỨ BA', 'NGÀY LƯU', 'TÁC VỤ'].map(h => {
+                    const isPayoutMonthHeader = h.startsWith('THÁNG ')
                     let tooltipContent: React.ReactNode = null
-                    if (h === 'HỆ SỐ') {
+                    if (h === 'TARGET') {
+                      tooltipContent = (
+                        <div className="commission-tooltip-text tooltip-down" style={{ width: '250px', padding: '12px 14px' }}>
+                          <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block' }}>Công thức Target</strong>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#cbd5e1', fontSize: 11 }}>
+                            <span style={{ color: '#93c5fd', fontWeight: 700 }}>Target</span>
+                            <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>Lương HĐLĐ × 2</span>
+                          </div>
+                          <div style={{ color: '#94a3b8', fontSize: 11, borderTop: '1px solid #334155', paddingTop: 6, marginTop: 7 }}>* Giá trị sửa thủ công, nếu có, sẽ được ưu tiên.</div>
+                        </div>
+                      )
+                    } else if (h === 'ĐANG GIỮ') {
+                      tooltipContent = (
+                        <div className="commission-tooltip-text tooltip-down" style={{ width: '280px', padding: '12px 14px' }}>
+                          <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block' }}>Công thức Đang giữ</strong>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#cbd5e1', fontSize: 11 }}>
+                            <span style={{ color: '#fbbf24', fontWeight: 700 }}>Điều kiện</span>
+                            <span style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Hold 30% ≥ Tổng thưởng / 3</span>
+                          </div>
+                          <div style={{ color: '#94a3b8', fontSize: 11, borderTop: '1px solid #334155', paddingTop: 6, marginTop: 7 }}>* Đúng điều kiện: giữ toàn bộ Profit Sale = Profit/Loss × 95%.</div>
+                        </div>
+                      )
+                    } else if (h === 'KHẢ DỤNG') {
+                      tooltipContent = (
+                        <div className="commission-tooltip-text tooltip-down" style={{ width: 290, padding: '12px 14px' }}>
+                          <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block' }}>Ví bonus tạm giữ</strong>
+                          <div style={{ color: '#cbd5e1', fontSize: 11, lineHeight: 1.5 }}>Chứa toàn bộ tiền thưởng đang tạm giữ. Số này có thể chuyển sang kỳ khác hoặc lên lịch trả vào tháng khác.</div>
+                        </div>
+                      )
+                    } else if (h === 'HỆ SỐ') {
                       tooltipContent = (
                         <div className="commission-tooltip-text tooltip-down" style={{ width: '220px', padding: '12px 14px' }}>
                           <strong style={{ fontSize: '11px', color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '6px', display: 'block', fontWeight: 700, letterSpacing: '0.02em' }}>
                             Mốc Level &amp; % Bonus
                           </strong>
-                          
-                          {/* Header Row */}
-                          <div style={{ display: 'flex', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '6px', alignItems: 'center' }}>
-                            <div style={{ width: '60%', fontWeight: 700, color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Hệ số (Coef)</div>
-                            <div style={{ width: '40%', fontWeight: 700, color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>% RATE</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '7px 16px', fontSize: 11, color: '#cbd5e1' }}>
+                            <span style={{ color: '#94a3b8', fontWeight: 700 }}>HỆ SỐ (COEF)</span>
+                            <span style={{ color: '#94a3b8', fontWeight: 700, textAlign: 'right' }}>% RATE</span>
+                            {[
+                              ['≤ 2', '0%'],
+                              ['2.01 - 4', '20%'],
+                              ['4.01 - 6', '25%'],
+                              ['6.01 - 8', '30%'],
+                              ['> 8', '35%'],
+                            ].map(([level, rate]) => (
+                              <div key={level} style={{ display: 'contents' }}>
+                                <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{level}</span>
+                                <span style={{ fontWeight: 800, color: rate === '0%' ? '#94a3b8' : '#34d399', textAlign: 'right' }}>{rate}</span>
+                              </div>
+                            ))}
                           </div>
-
-                          {/* Rows */}
-                          {[
-                            { range: '≤ 2', rate: '0%', color: '#94a3b8' },
-                            { range: '2.01 - 4', rate: '20%', color: '#34d399' },
-                            { range: '4.01 - 6', rate: '25%', color: '#34d399' },
-                            { range: '6.01 - 8', rate: '30%', color: '#34d399' },
-                            { range: '> 8', rate: '35%', color: '#34d399' }
-                          ].map((item, idx) => (
-                            <div key={idx} style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              padding: '5px 6px',
-                              margin: '1px -6px',
-                              borderRadius: '6px',
-                              fontSize: '9.5px',
-                              backgroundColor: 'transparent',
-                            }}>
-                              <div style={{ width: '60%', color: '#e2e8f0', fontWeight: 500 }}>
-                                {item.range}
-                              </div>
-                              <div style={{ width: '40%', textAlign: 'right', color: item.color, fontWeight: 700, fontFamily: 'monospace' }}>
-                                {item.rate}
-                              </div>
-                            </div>
-                          ))}
+                          <div style={{ color: '#94a3b8', fontSize: 11, borderTop: '1px solid #334155', paddingTop: 6, marginTop: 8, fontStyle: 'italic' }}>
+                            * Level = Profit Sale (95% Profit/Loss) ÷ Lương HĐLĐ. Level vượt ngưỡng cao nhất được hiển thị “&gt; 8”.
+                          </div>
                         </div>
                       )
                     } else if (h === 'TỔNG PROFIT / LOSS') {
@@ -1973,15 +3052,15 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                           <strong style={{ fontSize: '11px', color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '6px', display: 'block', fontWeight: 700, letterSpacing: '0.02em' }}>
                             Thông tin cột Tổng Profit / Loss
                           </strong>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '10px', color: '#cbd5e1', lineHeight: '1.4' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px', color: '#cbd5e1', lineHeight: '1.4' }}>
                             <div>
-                              • <b>Mỗi dòng:</b> Hiển thị Net Profit (Gross Profit × 95%) hoặc giá trị Net điều chỉnh thủ công.
+                              • <b>Mỗi dòng:</b> Hiển thị Profit Sale = 95% Profit/Loss gốc hoặc giá trị điều chỉnh thủ công.
                             </div>
                             <div style={{ borderTop: '1px solid #334155', paddingTop: '6px', marginTop: '2px' }}>
-                              • <b>Số tổng cộng (dòng cuối):</b> Tổng Net Profit của tất cả các Sales Rep.
+                              • <b>Số tổng cộng (dòng cuối):</b> Tổng Profit Sale của tất cả Sales Rep.
                             </div>
-                            <div style={{ color: '#34d399', fontWeight: 700, fontSize: '9.5px', marginTop: '2px' }}>
-                              Công thức: Tổng cộng = &sum;(Net Profit)
+                            <div style={{ color: '#34d399', fontWeight: 700, fontSize: '11px', marginTop: '2px' }}>
+                              Công thức: Tổng cộng = &sum;(Profit/Loss × 95%)
                             </div>
                           </div>
                         </div>
@@ -1992,42 +3071,46 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                           <strong style={{ fontSize: '11px', color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '6px', display: 'block', fontWeight: 700, letterSpacing: '0.02em' }}>
                             Công thức tính Tổng Thưởng
                           </strong>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '10px', color: '#cbd5e1' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px', color: '#cbd5e1' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                              <span style={{ color: '#38bdf8', fontWeight: 600 }}>1. Net Profit</span>
-                              <span style={{ textAlign: 'right', fontWeight: 500 }}>Tổng Profit/Loss × 95%</span>
+                              <span style={{ color: '#38bdf8', fontWeight: 600 }}>1. Chênh lệch</span>
+                              <span style={{ textAlign: 'right', fontWeight: 500 }}>max(0, Profit/Loss × 95% − Target)</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                              <span style={{ color: '#fca5a5', fontWeight: 600 }}>2. Target</span>
-                              <span style={{ textAlign: 'right', fontWeight: 500 }}>Lương HĐLĐ × 2</span>
+                              <span style={{ color: '#fca5a5', fontWeight: 600 }}>2. Hệ số</span>
+                              <span style={{ textAlign: 'right', fontWeight: 500 }}>0 nếu chưa vượt Target; ngược lại theo bậc thưởng</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                              <span style={{ color: '#c084fc', fontWeight: 600 }}>3. Chênh lệch (PF_BN)</span>
-                              <span style={{ textAlign: 'right', fontWeight: 500 }}>Net Profit − Target</span>
+                              <span style={{ color: '#c084fc', fontWeight: 600 }}>3. Tổng thưởng</span>
+                              <span style={{ textAlign: 'right', fontWeight: 500 }}>Chênh lệch × Hệ số</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', color: '#34d399' }}>
-                              <span style={{ fontWeight: 700 }}>4. Tổng thưởng</span>
-                              <span style={{ textAlign: 'right', fontWeight: 700 }}>Chênh lệch × Hệ số</span>
+                              <span style={{ fontWeight: 700 }}>4. Điều kiện</span>
+                              <span style={{ textAlign: 'right', fontWeight: 700 }}>Profit Sale ≤ Target ⇒ thưởng = 0</span>
                             </div>
-                            <div style={{ fontSize: '9px', color: '#94a3b8', fontStyle: 'italic', marginTop: '2px' }}>
-                              * Nếu Chênh lệch &le; 0 thì Tổng thưởng = 0
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderTop: '1px solid #334155', paddingTop: '4px', color: '#fbbf24' }}>
+                              <span style={{ fontWeight: 700 }}>5. Thưởng / tháng</span>
+                              <span style={{ textAlign: 'right', fontWeight: 700 }}>Tổng thưởng / 3</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', marginTop: '2px' }}>
+                              * Payment Received và Hold Bonus chỉ dùng đối soát/chi trả, không cộng vào Tổng thưởng.
                             </div>
                           </div>
                         </div>
                       )
-                    } else if (h === 'THƯỞNG / THÁNG') {
+                    } else if (isPayoutMonthHeader) {
                       tooltipContent = (
                         <div className="commission-tooltip-text tooltip-down" style={{ width: '240px', padding: '12px 14px' }}>
                           <strong style={{ fontSize: '11px', color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '6px', display: 'block', fontWeight: 700, letterSpacing: '0.02em' }}>
-                            Công thức tính Thưởng / Tháng
+                            Ba tháng chi trả của kỳ Commission
                           </strong>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '10px', color: '#cbd5e1' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px', color: '#cbd5e1' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#38bdf8' }}>
-                              <span style={{ fontWeight: 700 }}>Thưởng / Tháng</span>
-                              <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>Tổng thưởng / 3</span>
+                              <span style={{ fontWeight: 700 }}>Mỗi cột tháng</span>
+                              <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>max(0, Tổng thưởng / 3 − Đang giữ)</span>
                             </div>
-                            <div style={{ fontSize: '9px', color: '#94a3b8', borderTop: '1px solid #334155', paddingTop: '6px', marginTop: '2px', lineHeight: '1.4' }}>
-                              * Áp dụng chi trả theo từng tháng trong kỳ lương.
+                            <div style={{ fontSize: '11px', color: '#94a3b8', borderTop: '1px solid #334155', paddingTop: '6px', marginTop: '2px', lineHeight: '1.4' }}>
+                              * Tháng/năm được xác định từ ngày kết thúc kỳ nguồn; ba tháng chi trả là ba tháng kế tiếp.
                             </div>
                           </div>
                         </div>
@@ -2035,13 +3118,13 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     }
 
                     return (
-                      <th key={h} style={{
+                      <th key={h} className={h === 'KỲ' ? 'commission-history-sticky-start' : h === 'TÁC VỤ' ? 'commission-history-sticky-end' : undefined} style={{
                         padding: '12px 16px',
-                        textAlign: h === 'JOBS' || h === 'TÁC VỤ' || h === 'HỆ SỐ' ? 'center' : h === 'TỔNG PROFIT / LOSS' || h === 'TARGET' || h === 'TỔNG THƯỞNG' || h === 'ĐANG GIỮ' || h === 'THƯỞNG / THÁNG' ? 'right' : 'left',
+                        textAlign: h === 'JOBS' || h === 'TÁC VỤ' || h === 'HỆ SỐ' ? 'center' : h === 'TỔNG PROFIT / LOSS' || h === 'TARGET' || h === 'TỔNG THƯỞNG' || h === 'ĐANG GIỮ' || h === 'KHẢ DỤNG' || isPayoutMonthHeader ? 'right' : 'left',
                         fontWeight: 700, fontSize: 12, letterSpacing: '0.04em',
                         color: '#000000',
                       }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: h === 'JOBS' || h === 'TÁC VỤ' || h === 'HỆ SỐ' ? 'center' : h === 'TỔNG PROFIT / LOSS' || h === 'TARGET' || h === 'TỔNG THƯỞNG' || h === 'ĐANG GIỮ' || h === 'THƯỞNG / THÁNG' ? 'flex-end' : 'flex-start', width: '100%', gap: 4 }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: h === 'JOBS' || h === 'TÁC VỤ' || h === 'HỆ SỐ' ? 'center' : h === 'TỔNG PROFIT / LOSS' || h === 'TARGET' || h === 'TỔNG THƯỞNG' || h === 'ĐANG GIỮ' || h === 'KHẢ DỤNG' || isPayoutMonthHeader ? 'flex-end' : 'flex-start', width: '100%', gap: 4 }}>
                           <span>{h}</span>
                           {tooltipContent && (
                             <span className="commission-tooltip-container">
@@ -2062,34 +3145,31 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     borderTop: row.isFirstRep && idx > 0 ? '2px solid #cbd5e1' : '1px solid #cbd5e1',
                   }}>
                     {/* KỲ */}
-                    <td style={{
+                    <td className="commission-history-period-cell commission-history-sticky-start" style={{
                       padding: '12px 16px',
                       borderRight: '1px solid #cbd5e1',
+                      background: idx % 2 === 0 ? '#fff' : '#f8fafc',
                     }}>
-                      <button
-                        onClick={() => viewPeriodJobs(row.periodId, row.periodLabel, row.salesRep, row.sourceFilename || null)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          padding: 0,
-                          color: '#2563eb',
-                          textDecoration: 'underline',
-                          fontWeight: 700,
-                          fontSize: 13,
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                        }}
-                      >
-                        📅 {row.periodLabel}
-                      </button>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 5 }}>
+                        <span style={{ alignSelf: 'center', padding: '3px 7px', borderRadius: 999, background: '#e0f2fe', color: '#075985', fontSize: 11, lineHeight: 1, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                          {commissionQuarterLabel(row.fromDate, row.tillDate)}
+                        </span>
+                        <button
+                          onClick={() => viewPeriodJobs(row.periodId, row.periodLabel, row.salesRep, row.sourceFilename || null)}
+                          title={`Mở chi tiết ${row.periodLabel}`}
+                          style={{ width: '100%', minHeight: 42, border: '1px solid #0369a1', borderRadius: 9, padding: '5px 7px', background: 'linear-gradient(135deg,#0ea5e9,#0369a1)', color: '#fff', fontWeight: 800, fontSize: 11, lineHeight: 1.25, cursor: 'pointer', textAlign: 'center', whiteSpace: 'normal', overflowWrap: 'normal', wordBreak: 'normal' }}
+                        >
+                          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}><AppIcon name="calendar" size={13} /> {row.periodLabel}</span>
+                        </button>
+                      </div>
                     </td>
 
                     {/* SALES REP */}
                     <td style={{ padding: '12px 16px', fontWeight: 600, color: '#000000', fontSize: 14, borderRight: '1px solid #cbd5e1' }}>
-                      <div>👤 {row.salesRep}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}><AppIcon name="user" size={14} /> {row.salesRep}</div>
                       {row.remark ? (
                         <div style={{ fontSize: 11, fontWeight: 400, color: '#475569', fontStyle: 'italic', marginTop: 4, whiteSpace: 'pre-wrap', maxWidth: 180, textAlign: 'left' }}>
-                          💬 {row.remark}
+                          <AppIcon name="message" size={13} /> {row.remark}
                         </div>
                       ) : null}
                     </td>
@@ -2125,7 +3205,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     <td style={{
                       padding: '8px 16px', textAlign: 'right',
                       fontWeight: 800, fontFamily: 'monospace', fontSize: 15,
-                      color: (row.repPnL * 0.95) >= 0 ? '#15803d' : '#b91c1c',
+                      color: row.repPnL * 0.95 >= 0 ? '#15803d' : '#b91c1c',
                       borderRight: '1px solid #cbd5e1',
                     }}>
                       {editingRowKey === `${row.periodId}-${row.salesRep}` && editDraft ? (
@@ -2166,25 +3246,25 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                         <span>
                           {fmtNum(row.repPnL * 0.95)}
                           {row.isPnLOverridden && (
-                            <span style={{ color: '#f59e0b', marginLeft: 4, fontSize: 11, cursor: 'help' }} title="Đã sửa thủ công">✏️</span>
+                            <span style={{ display: 'inline-flex', color: '#b96a06', marginLeft: 4, cursor: 'help' }} title="Đã sửa thủ công"><AppIcon name="edit" size={12} /></span>
                           )}
                           <span className="commission-tooltip-container" style={{ marginLeft: 4 }}>
                             <span className="commission-tooltip-icon">?</span>
                             <div className={`commission-tooltip-text ${idx === 0 ? 'tooltip-down' : 'tooltip-up'}`} style={{ width: '220px', padding: '12px 14px' }}>
                               <strong style={{ fontSize: '11px', color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '6px', display: 'block', fontWeight: 700, letterSpacing: '0.02em' }}>
-                                Công thức tính Net Profit
+                                Công thức Profit Sale dùng tính thưởng
                               </strong>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '9.5px', color: '#cbd5e1' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: '#cbd5e1' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span>Gross Profit/Loss:</span>
+                                  <span>Profit/Loss gốc:</span>
                                   <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{fmtNum(row.repPnL)}</span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span>Tỷ lệ Net:</span>
+                                  <span>Tỷ lệ Profit Sale:</span>
                                   <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>95%</span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #334155', paddingTop: '4px', marginTop: '2px', color: '#34d399' }}>
-                                  <span style={{ fontWeight: 600 }}>Thực nhận (Net):</span>
+                                  <span style={{ fontWeight: 600 }}>Profit Sale:</span>
                                   <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{fmtNum(row.repPnL * 0.95)}</span>
                                 </div>
                               </div>
@@ -2237,10 +3317,21 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                         </div>
                       ) : (
                         <span>
-                          {row.repTarget > 0 ? fmtNum(row.repTarget) : '—'}
+                          {getTargetView(row) > 0 ? fmtNum(getTargetView(row)) : '—'}
                           {row.isTargetOverridden && (
-                            <span style={{ color: '#f59e0b', marginLeft: 4, fontSize: 11, cursor: 'help' }} title="Đã sửa thủ công">✏️</span>
+                            <span style={{ display: 'inline-flex', color: '#b96a06', marginLeft: 4, cursor: 'help' }} title="Đã sửa thủ công"><AppIcon name="edit" size={12} /></span>
                           )}
+                          <span className="commission-tooltip-container">
+                            <span className="commission-tooltip-icon" tabIndex={0} aria-label={`Xem công thức Target của ${row.salesRep}`}>?</span>
+                            <div className={`commission-tooltip-text ${idx === 0 ? 'tooltip-down' : 'tooltip-up'}`} style={{ width: 280, padding: '12px 14px' }}>
+                              <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block' }}>Target · {row.salesRep}</strong>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, color: '#cbd5e1', fontSize: 11 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Lương HĐLĐ</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(row.employeeSalary)} VND</b></div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Hệ số Target</span><b>× 2</b></div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #334155', paddingTop: 6, color: '#34d399' }}><span style={{ fontWeight: 700 }}>Target</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(getTargetView(row))} VND</b></div>
+                              </div>
+                            </div>
+                          </span>
                         </span>
                       )}
                     </td>
@@ -2249,16 +3340,18 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     <td style={{
                       padding: '8px 16px', textAlign: 'center',
                       fontWeight: 700, fontSize: 13,
-                      color: row.repRate > 0 ? '#b45309' : '#64748b',
+                      color: getWalletPeriodView(row).formulaCoefficient > 0 ? '#b45309' : '#64748b',
                       borderRight: '1px solid #cbd5e1',
                     }}>
                       <span>
                         {(() => {
-                          const displayCoef = row.repCoefficient || (row.employeeSalary > 0 ? (row.repPnL * 0.95 / row.employeeSalary) : 0);
-                          return displayCoef > 0 ? displayCoef.toFixed(2) : '0.00';
+                          const referenceLevel = row.repPnL * 0.95 > getTargetView(row)
+                            ? getBonusReferenceLevel(row.repPnL, row.employeeSalary)
+                            : 0;
+                          return fmtBonusReferenceLevel(referenceLevel);
                         })()}
                         {row.isRateOverridden && (
-                          <span style={{ color: '#f59e0b', marginLeft: 4, fontSize: 11, cursor: 'help' }} title="Đã sửa thủ công">✏️</span>
+                          <span style={{ display: 'inline-flex', color: '#b96a06', marginLeft: 4, cursor: 'help' }} title="Đã sửa thủ công"><AppIcon name="edit" size={12} /></span>
                         )}
                         <span className="commission-tooltip-container">
                           <span className="commission-tooltip-icon">?</span>
@@ -2271,7 +3364,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     <td style={{
                       padding: '8px 16px', textAlign: 'right',
                       fontWeight: 800, fontFamily: 'monospace', fontSize: 15,
-                      color: row.repTotalBonus > 0 ? '#0d9488' : '#64748b',
+                      color: getWalletPeriodView(row).formulaTotalBonus > 0 ? '#0d9488' : '#64748b',
                       borderRight: '1px solid #cbd5e1',
                     }}>
                       {editingRowKey === `${row.periodId}-${row.salesRep}` && editDraft ? (
@@ -2310,9 +3403,9 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                         </div>
                       ) : (
                         <span>
-                          {row.repTotalBonus > 0 ? fmtNum(row.repTotalBonus) : '—'}
+                          {getWalletPeriodView(row).formulaTotalBonus > 0 ? fmtNum(getWalletPeriodView(row).formulaTotalBonus) : '—'}
                           {row.isTotalBonusOverridden && (
-                            <span style={{ color: '#f59e0b', marginLeft: 4, fontSize: 11, cursor: 'help' }} title="Đã sửa thủ công">✏️</span>
+                            <span style={{ display: 'inline-flex', color: '#b96a06', marginLeft: 4, cursor: 'help' }} title="Đã sửa thủ công"><AppIcon name="edit" size={12} /></span>
                           )}
                            <span className="commission-tooltip-container">
                             <span className="commission-tooltip-icon">?</span>
@@ -2320,37 +3413,36 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                               <strong style={{ fontSize: '11px', color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '6px', display: 'block', fontWeight: 700, letterSpacing: '0.02em' }}>
                                 Cách tính Tổng Thưởng ({row.salesRep})
                               </strong>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '10px', color: '#cbd5e1' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px', color: '#cbd5e1' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                                  <span style={{ color: '#cbd5e1' }}>Chênh lệch (Net PnL - Target):</span>
+                                  <span style={{ color: '#cbd5e1' }}>Chênh lệch (Profit Sale − Target):</span>
                                   <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#fca5a5' }}>
-                                    {fmtNum(row.repPnL * 0.95 - row.repTarget)} VND
+                                    {fmtNum(Math.max(0, row.repPnL * 0.95 - getTargetView(row)))} VND
                                   </span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                                  <span style={{ color: '#cbd5e1' }}>Coefficient (Net PnL / Salary):</span>
+                                  <span style={{ color: '#cbd5e1' }}>Tỷ lệ thưởng hiệu dụng sau lũy tiến:</span>
                                   <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#93c5fd' }}>
-                                    {row.repCoefficient ? row.repCoefficient.toFixed(2) : (row.employeeSalary > 0 ? (row.repPnL * 0.95 / row.employeeSalary).toFixed(2) : '0.00')}
+                                    {fmtBonusCoefficient(getWalletPeriodView(row).formulaCoefficient)}
                                   </span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                                  <span style={{ color: '#cbd5e1' }}>Level hiện tại:</span>
-                                  <span style={{ fontWeight: 700, color: '#c084fc' }}>
-                                    {getLevelName(row.repCoefficient || (row.employeeSalary > 0 ? (row.repPnL * 0.95 / row.employeeSalary) : 0))}
-                                  </span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                                  <span style={{ color: '#cbd5e1' }}>Mức bonus (Hệ số):</span>
+                                  <span style={{ color: '#cbd5e1' }}>Tỷ lệ công thức đang lưu:</span>
                                   <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#a78bfa' }}>
-                                    {Math.round(row.repRate * 100)}%
+                                    {fmtBonusCoefficient(row.repRate)}
                                   </span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#38bdf8' }}>
-                                  <span style={{ fontWeight: 700 }}>Thưởng (Chênh lệch × Hệ số):</span>
+                                  <span style={{ fontWeight: 700 }}>Tổng theo công thức P/L (tham chiếu):</span>
                                   <span style={{ fontFamily: 'monospace', fontWeight: 800 }}>
-                                    {fmtNum(row.repTotalBonus)} VND
+                                    {fmtNum(getWalletPeriodView(row).formulaTotalBonus)} VND
                                   </span>
                                 </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #334155', paddingTop: 5, color: '#34d399' }}>
+                                  <span style={{ fontWeight: 700 }}>Tổng thưởng:</span>
+                                  <span style={{ fontFamily: 'monospace', fontWeight: 800 }}>{fmtNum(getWalletPeriodView(row).formulaTotalBonus)} VND</span>
+                                </div>
+                                <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Payment Received không tham gia phép tính này.</div>
                               </div>
                             </div>
                           </span>
@@ -2358,114 +3450,87 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                       )}
                     </td>
 
-                    {/* ĐANG GIỮ — số chung của đúng kỳ/quý, không nhân theo tháng */}
+                    {/* ĐANG GIỮ — giữ toàn bộ Profit Sale khi Hold 30% ăn hết thưởng tháng */}
                     <td style={{
                       padding: '8px 16px', textAlign: 'right',
                       fontWeight: 800, fontFamily: 'monospace', fontSize: 15,
                       color: getWalletPeriodView(row).heldAmount > 0 ? '#b45309' : '#64748b',
                       borderRight: '1px solid #cbd5e1',
                     }}>
-                      {getWalletPeriodView(row).heldAmount > 0 ? fmtNum(getWalletPeriodView(row).heldAmount) : '0'}
+                      <span>
+                        {getWalletPeriodView(row).heldAmount > 0 ? fmtNum(getWalletPeriodView(row).heldAmount) : '0'}
+                        <span className="commission-tooltip-container">
+                          <span className="commission-tooltip-icon" tabIndex={0} aria-label={`Xem chi tiết Đang giữ của ${row.salesRep}`}>?</span>
+                          <div className={`commission-tooltip-text ${idx === 0 ? 'tooltip-down' : 'tooltip-up'}`} style={{ width: 300, padding: '12px 14px' }}>
+                            <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block' }}>Đang giữ · {row.salesRep}</strong>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, color: '#cbd5e1', fontSize: 11 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Hold 30% JOB</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(getWalletPeriodView(row).policyHoldAmount)} VND</b></div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Thưởng cơ sở / tháng</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(getWalletPeriodView(row).formulaMonthlyBonus)} VND</b></div>
+                              <div style={{ color: '#94a3b8', fontSize: 11 }}>{getWalletPeriodView(row).holdsEntireProfit ? 'Hold 30% ≥ thưởng tháng nên giữ toàn bộ Profit Sale.' : 'Hold 30% chưa vượt thưởng tháng nên chỉ giữ theo mức Hold.'}</div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #334155', paddingTop: 6, color: '#fbbf24' }}><span style={{ fontWeight: 700 }}>Tổng đang giữ</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(getWalletPeriodView(row).heldAmount)} VND</b></div>
+                            </div>
+                          </div>
+                        </span>
+                      </span>
                     </td>
 
-                    {/* THƯỞNG / THÁNG */}
+                    {/* KHẢ DỤNG — ví bonus tạm giữ có thể điều chuyển/lên lịch */}
                     <td style={{
                       padding: '8px 16px', textAlign: 'right',
                       fontWeight: 800, fontFamily: 'monospace', fontSize: 15,
-                      color: row.repBonus > 0 ? '#1d4ed8' : '#64748b',
+                      color: getWalletPeriodView(row).temporaryBonusAvailable > 0 ? '#047857' : '#64748b',
                       borderRight: '1px solid #cbd5e1',
                     }}>
-                      {editingRowKey === `${row.periodId}-${row.salesRep}` && editDraft ? (
-                        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                          <input
-                            type="checkbox"
-                            checked={manualChecked.repBonus}
-                            onChange={(e) => handleCheckboxChange('repBonus', e.target.checked, row)}
-                            title="Sửa thủ công"
-                            style={{ cursor: 'pointer', width: '14px', height: '14px', minWidth: '14px', minHeight: '14px', flexShrink: 0, margin: 0, padding: 0 }}
-                          />
-                          <VndInput
-                            value={editDraft.repBonus}
-                            disabled={!manualChecked.repBonus}
-                            onValueChange={(value) => {
-                              if (editDraft) {
-                                const nextDraft = { ...editDraft, repBonus: String(value) };
-                                setEditDraft(recalculateDraft(nextDraft, manualChecked, row));
-                              }
-                            }}
-                            style={{
-                              width: 120,
-                              textAlign: 'right',
-                              height: 28,
-                              borderRadius: 5,
-                              border: '1px solid #cbd5e1',
-                              borderColor: manualChecked.repBonus ? '#3b82f6' : '#cbd5e1',
-                              background: manualChecked.repBonus ? '#fff' : '#f1f5f9',
-                              color: manualChecked.repBonus ? '#000' : '#64748b',
-                              fontSize: 13,
-                              outline: 'none',
-                              fontFamily: 'monospace',
-                              fontWeight: 700,
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <span>
-                          {row.repBonus > 0 ? fmtNum(row.repBonus) : '—'}
-                          {row.isMonthlyBonusOverridden && (
-                            <span style={{ color: '#f59e0b', marginLeft: 4, fontSize: 11, cursor: 'help' }} title="Đã sửa thủ công">✏️</span>
-                          )}
-                           <span className="commission-tooltip-container">
-                            <span className="commission-tooltip-icon">?</span>
-                            <div className={`commission-tooltip-text ${idx === 0 ? 'tooltip-down' : 'tooltip-up'}`} style={{ width: '340px', padding: '12px 14px' }}>
-                              <strong style={{ fontSize: '11px', color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: '5px', marginBottom: '6px', display: 'block', fontWeight: 700, letterSpacing: '0.02em' }}>
-                                Cách tính Thưởng / Tháng ({row.salesRep})
-                              </strong>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '10px', color: '#cbd5e1' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                                  <span style={{ color: '#cbd5e1' }}>Tổng thưởng:</span>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#38bdf8' }}>
-                                    {fmtNum(row.repTotalBonus)} VND
-                                  </span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                                  <span style={{ color: '#cbd5e1' }}>Level hiện tại:</span>
-                                  <span style={{ fontWeight: 700, color: '#c084fc' }}>
-                                    {getLevelName(row.repCoefficient || (row.employeeSalary > 0 ? (row.repPnL * 0.95 / row.employeeSalary) : 0))}
-                                  </span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
-                                  <span style={{ color: '#cbd5e1' }}>Mức bonus (Hệ số):</span>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#a78bfa' }}>
-                                    {Math.round(row.repRate * 100)}%
-                                  </span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#34d399' }}>
-                                  <span style={{ fontWeight: 700 }}>Thưởng / Tháng (Tổng / 3):</span>
-                                  <span style={{ fontFamily: 'monospace', fontWeight: 800 }}>
-                                    {fmtNum(row.repBonus)} VND
-                                  </span>
-                                </div>
-                                <div style={{ borderTop: '1px solid #334155', paddingTop: 7 }}>
-                                  <div style={{ color: '#fbbf24', fontWeight: 700, marginBottom: 5 }}>
-                                    Đang giữ cả quý: {fmtNum(getWalletPeriodView(row).heldAmount)} VND
-                                  </div>
-                                  {getWalletPeriodView(row).monthlyAvailableAmounts.length > 0 ? getWalletPeriodView(row).monthlyAvailableAmounts.map(item => (
-                                    <div key={item.payout_period} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#34d399', marginTop: 3 }}>
-                                      <span>Khả dụng {item.payout_period.replace('-', '/')}:</span>
-                                      <b style={{ fontFamily: 'monospace' }}>{fmtNum(item.amount)} VND</b>
-                                    </div>
-                                  )) : <div style={{ color: '#94a3b8' }}>Chưa có dữ liệu khả dụng theo tháng.</div>}
-                                </div>
-                                <div style={{ fontSize: 9, color: '#94a3b8', borderTop: '1px solid #334155', paddingTop: 6, lineHeight: 1.45 }}>
-                                  Khả dụng/tháng là số có thể chi thực tế sau khi trừ phần bonus đang giữ của cả quý. Khoản đang giữ chỉ tính một lần cho quý, không nhân ba.
-                                </div>
-                              </div>
+                      <span>
+                        {fmtNum(getWalletPeriodView(row).temporaryBonusAvailable)}
+                        <span className="commission-tooltip-container">
+                          <span className="commission-tooltip-icon" tabIndex={0} aria-label={`Xem ví bonus tạm giữ của ${row.salesRep}`}>?</span>
+                          <div className={`commission-tooltip-text ${idx === 0 ? 'tooltip-down' : 'tooltip-up'}`} style={{ width: 320, padding: '12px 14px' }}>
+                            <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 7, display: 'block' }}>Khả dụng · {row.salesRep}</strong>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, color: '#cbd5e1', fontSize: 11 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tổng thưởng quý</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(getWalletPeriodView(row).formulaTotalBonus)} VND</b></div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Thưởng trả mỗi tháng</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(getWalletPeriodView(row).monthlyPayout)} VND</b></div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Ví tạm giữ ban đầu</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(getWalletPeriodView(row).temporaryBonusOpening)} VND</b></div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #334155', paddingTop: 6, color: '#34d399' }}><span style={{ fontWeight: 700 }}>Bonus đang tạm giữ</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(getWalletPeriodView(row).temporaryBonusAvailable)} VND</b></div>
+                              <div style={{ color: '#94a3b8', fontSize: 11, lineHeight: 1.45 }}>Có thể chuyển sang kỳ khác hoặc lên lịch trả vào tháng khác.</div>
                             </div>
-                          </span>
+                          </div>
                         </span>
-                      )}
+                      </span>
                     </td>
+
+                    {/* BA THÁNG CHI TRẢ — xác định từ kỳ nguồn */}
+                    {getHistoryMonthlyPayouts(row).map((payout, monthIndex) => (
+                      <td key={`${row.periodId}-${row.salesRep}-${payout.payout_period || monthIndex}`} style={{ padding: '8px 7px', textAlign: 'right', fontWeight: 800, fontFamily: 'monospace', fontSize: 13, color: payout.amount > 0 ? '#1d4ed8' : '#64748b', borderRight: '1px solid #cbd5e1' }}>
+                        {monthIndex === 0 && editingRowKey === `${row.periodId}-${row.salesRep}` && editDraft ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                            <input type="checkbox" checked={manualChecked.repBonus} onChange={(e) => handleCheckboxChange('repBonus', e.target.checked, row)} title="Sửa mức thưởng cơ sở áp dụng cho cả 3 tháng" style={{ cursor: 'pointer', width: 14, height: 14, flexShrink: 0, margin: 0 }} />
+                            <VndInput value={editDraft.repBonus} disabled={!manualChecked.repBonus} onValueChange={(value) => setEditDraft(recalculateDraft({ ...editDraft, repBonus: String(value) }, manualChecked, row))} style={{ width: 112, textAlign: 'right', height: 28, borderRadius: 5, border: '1px solid', borderColor: manualChecked.repBonus ? '#3b82f6' : '#cbd5e1', background: manualChecked.repBonus ? '#fff' : '#f1f5f9', color: manualChecked.repBonus ? '#000' : '#64748b', fontSize: 12, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} />
+                          </div>
+                        ) : (
+                          <span>
+                            <small style={{ display: 'block', marginBottom: 4, color: '#475569', fontFamily: 'sans-serif', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{payoutPeriodLabel(payout.payout_period)}</small>
+                            <span>{fmtNum(payout.amount)}</span>
+                            {monthIndex === 0 && row.isMonthlyBonusOverridden && <span style={{ display: 'inline-flex', color: '#b96a06', marginLeft: 4, cursor: 'help' }} title="Mức thưởng tháng đã sửa thủ công"><AppIcon name="edit" size={12} /></span>}
+                            <span className="commission-tooltip-container">
+                              <HistoryMonthFloatingTooltip ariaLabel={`Xem thưởng ${payoutPeriodLabel(payout.payout_period)} của ${row.salesRep}`}>
+                                <strong style={{ fontSize: 11, color: '#f8fafc', borderBottom: '1px solid #334155', paddingBottom: 5, marginBottom: 6, display: 'block' }}>{payoutPeriodLabel(payout.payout_period)} · {commissionQuarterLabel(row.fromDate, row.tillDate)}</strong>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 11, color: '#cbd5e1' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Kỳ nguồn</span><b>{row.periodLabel}</b></div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Tổng thưởng</span><b style={{ fontFamily: 'monospace', color: '#38bdf8' }}>{fmtNum(getWalletPeriodView(row).formulaTotalBonus)} VND</b></div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Thưởng ban đầu</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(payout.base_amount)} VND</b></div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Hold được giải phóng</span><b style={{ fontFamily: 'monospace', color: payout.released_amount > 0 ? '#a7f3d0' : '#94a3b8' }}>{fmtNum(payout.released_amount)} VND</b></div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Đang giữ</span><b style={{ fontFamily: 'monospace', color: '#fbbf24' }}>{fmtNum(getWalletPeriodView(row).heldAmount)} VND</b></div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, borderTop: '1px solid #334155', paddingTop: 6, color: '#34d399' }}><span style={{ fontWeight: 700 }}>Thực trả tháng</span><b style={{ fontFamily: 'monospace' }}>{fmtNum(payout.amount)} VND</b></div>
+                                  <div style={{ color: '#94a3b8', fontSize: 11 }}>* Thưởng ban đầu được chia đều và giữ nguyên ở cả 3 tháng. Hold được giải phóng chỉ chia đều và cộng vào các tháng đã chọn; các tháng không chọn không thay đổi.</div>
+                                  <div style={{ color: '#94a3b8', fontSize: 11 }}>* Tháng chi đầu tiên chỉ được chọn khi khách thanh toán chậm nhất ngày 25; thanh toán sau ngày 25 thì phần Hold chỉ có thể phân bổ vào các tháng chi còn lại.</div>
+                                </div>
+                              </HistoryMonthFloatingTooltip>
+                            </span>
+                          </span>
+                        )}
+                      </td>
+                    ))}
 
                     {/* NGÀY LƯU — only show on first rep row */}
                     <td style={{
@@ -2478,7 +3543,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     </td>
 
                     {/* TÁC VỤ */}
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                    <td className="commission-history-sticky-end" style={{ padding: '12px 16px', textAlign: 'center', background: idx % 2 === 0 ? '#fff' : '#f8fafc' }}>
                       {editingRowKey === `${row.periodId}-${row.salesRep}` && editDraft ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
                           <textarea
@@ -2518,8 +3583,12 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                           </div>
                         </div>
                       ) : (
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}>
+                        <div className="commission-history-actions" style={{ display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}>
                           <button
+                            type="button"
+                            className="commission-icon-action"
+                            aria-label={`Mở ví thưởng của ${row.salesRep}`}
+                            data-tooltip="Mở ví thưởng"
                             onClick={() => focusWalletFromHistory(row)}
                             style={{
                               height: 28, padding: '0 12px', borderRadius: 7,
@@ -2527,8 +3596,13 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                               color: '#6d28d9', fontSize: 11, fontWeight: 700, cursor: 'pointer',
                             }}
                             title={`Mở ví thưởng của ${row.salesRep} cho kỳ ${row.periodLabel}`}
-                          >💼 Ví thưởng</button>
+                          ><AppIcon name="wallet" size={16} /></button>
                           <button
+                            type="button"
+                            className="commission-icon-action"
+                            aria-label={`Sửa commission của ${row.salesRep}`}
+                            data-tooltip="Sửa"
+                            title={`Sửa commission của ${row.salesRep}`}
                             onClick={() => {
                               console.log('DEBUG: Edit button clicked!');
                               console.log('row info:', {
@@ -2584,8 +3658,13 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                               border: '1px solid #3b82f6', background: '#eff6ff',
                               color: '#1d4ed8', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                             }}
-                          >✏️ Sửa</button>
+                          ><AppIcon name="edit" size={16} /></button>
                           <button
+                            type="button"
+                            className="commission-icon-action"
+                            aria-label={`Thêm hoặc sửa ghi chú của ${row.salesRep}`}
+                            data-tooltip="Ghi chú"
+                            title={`Thêm hoặc sửa ghi chú của ${row.salesRep}`}
                             onClick={() => {
                               setRemarkModalData({
                                 row: row,
@@ -2598,15 +3677,20 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                               color: '#047857', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                               display: 'flex', alignItems: 'center', gap: 4
                             }}
-                          >💬 Remark</button>
+                          ><AppIcon name="message" size={16} /></button>
                           <button
+                              type="button"
+                              aria-label={`Xóa commission của ${row.salesRep}`}
+                              data-tooltip="Xóa"
+                              title={`Xóa commission của ${row.salesRep}`}
                               onClick={() => deleteSalesRepCommission(row.periodId, row.periodLabel, row.salesRep)}
+                              className="app-delete-button commission-icon-action"
                               style={{
                                 height: 28, padding: '0 12px', borderRadius: 7,
                                 border: '1px solid #fca5a5', background: '#fef2f2',
                                 color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                               }}
-                            >🗑 Xóa</button>
+                            ><AppIcon name="trash" size={16} /></button>
                         </div>
                       )}
                     </td>
@@ -2626,7 +3710,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     <td style={{
                       padding: '12px 16px', textAlign: 'right',
                       fontFamily: 'monospace', fontSize: 16, fontWeight: 900,
-                      color: (historyRows.reduce((s, r) => s + r.repPnL, 0) * 0.95) >= 0 ? '#15803d' : '#b91c1c',
+                      color: historyRows.reduce((s, r) => s + r.repPnL, 0) * 0.95 >= 0 ? '#15803d' : '#b91c1c',
                       borderRight: '1px solid #cbd5e1',
                     }}>
                       {fmtNum(historyRows.reduce((s, r) => s + r.repPnL, 0) * 0.95)}
@@ -2659,7 +3743,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                       color: '#0d9488',
                       borderRight: '1px solid #cbd5e1',
                     }}>
-                      {fmtNum(historyRows.reduce((s, r) => s + r.repTotalBonus, 0))}
+                      {fmtNum(historyRows.reduce((sum, row) => sum + getWalletPeriodView(row).formulaTotalBonus, 0))}
                     </td>
 
                     {/* ĐANG GIỮ total */}
@@ -2675,10 +3759,19 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     <td style={{
                       padding: '12px 16px', textAlign: 'right',
                       fontFamily: 'monospace', fontSize: 16, fontWeight: 900,
+                      color: '#047857',
+                      borderRight: '1px solid #cbd5e1',
+                    }}>
+                      {fmtNum(historyRows.reduce((sum, row) => sum + getWalletPeriodView(row).temporaryBonusAvailable, 0))}
+                    </td>
+
+                    <td style={{
+                      padding: '12px 16px', textAlign: 'right',
+                      fontFamily: 'monospace', fontSize: 16, fontWeight: 900,
                       color: '#1d4ed8',
                       borderRight: '1px solid #cbd5e1',
                     }}>
-                      {fmtNum(historyRows.reduce((s, r) => s + r.repBonus, 0))}
+                      {fmtNum(historyRows.reduce((sum, row) => sum + getWalletPeriodView(row).monthlyPayout, 0))}
                     </td>
                     <td colSpan={2} />
                   </tr>
@@ -2686,6 +3779,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
       )}
@@ -2714,7 +3808,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#1e293b' }}>
-                💬 Thêm/Sửa Ghi chú (Remark)
+                <AppIcon name="message" size={17} /> Thêm/Sửa Ghi chú (Remark)
               </h3>
               <button 
                 onClick={() => setRemarkModalData(null)}
@@ -2729,7 +3823,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                   lineHeight: 1
                 }}
               >
-                ✕
+                <AppIcon name="close" size={15} />
               </button>
             </div>
             
@@ -2817,7 +3911,9 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
             borderRadius: '16px',
             padding: '24px',
             width: '100%',
-            maxWidth: '520px',
+            maxWidth: '720px',
+            maxHeight: 'calc(100vh - 32px)',
+            overflowY: 'auto',
             boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
             display: 'flex',
             flexDirection: 'column',
@@ -2825,7 +3921,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#b91c1c', display: 'flex', alignItems: 'center', gap: 6 }}>
-                ⚠️ Cảnh báo trùng kỳ Commission
+                <AppIcon name="warning" size={17} /> Cảnh báo trùng kỳ Commission
               </h3>
               <button 
                 onClick={() => setOverlapWarningData(null)}
@@ -2840,12 +3936,12 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                   lineHeight: 1
                 }}
               >
-                ✕
+                <AppIcon name="close" size={15} />
               </button>
             </div>
             
             <div style={{ fontSize: '14px', color: '#334155', lineHeight: '1.6' }}>
-              Kỳ import mới này (<b>{periodLabel}</b>) có tháng trùng với các kỳ đã import trước đó trong cơ sở dữ liệu:
+              File đang tải lên có khoảng ngày trùng với kỳ Commission đã lưu:
             </div>
 
             <div style={{
@@ -2869,11 +3965,108 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
               ))}
             </div>
 
+            {overlapWarningData.mergePreview && (
+              <div style={{ display: 'grid', gap: '12px' }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: '8px',
+                }}>
+                  {[
+                    ['JOB mới sẽ thêm', overlapWarningData.mergePreview.newJobs, '#047857', '#ecfdf5'],
+                    ['JOB thường cập nhật', overlapWarningData.mergePreview.automaticUpdates, '#0369a1', '#f0f9ff'],
+                    ['JOB đã sửa thủ công', overlapWarningData.mergePreview.manualJobs.length, '#b45309', '#fffbeb'],
+                  ].map(([label, value, color, background]) => (
+                    <div key={String(label)} style={{ padding: '10px', borderRadius: '9px', background: String(background), color: String(color) }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700 }}>{label}</div>
+                      <div style={{ marginTop: 2, fontSize: '18px', fontWeight: 800 }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {overlapWarningData.mergePreview.manualJobs.length > 0 ? (
+                  <div style={{ border: '1px solid #fcd34d', borderRadius: '10px', overflow: 'hidden' }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 12px',
+                      background: '#fffbeb',
+                    }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#92400e' }}>JOB đã có chỉnh sửa thủ công</div>
+                        <div style={{ marginTop: 2, fontSize: '11.5px', color: '#a16207' }}>
+                          Chỉ JOB được chọn mới nhận dữ liệu P&amp;L từ file mới. Dữ liệu Hold Bonus, công nợ và lịch sử vẫn được bảo toàn.
+                        </div>
+                      </div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', fontSize: '12px', fontWeight: 700, color: '#92400e', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={overlapWarningData.selectedManualJobIds.length === overlapWarningData.mergePreview.manualJobs.length}
+                          onChange={event => setOverlapWarningData(previous => previous ? {
+                            ...previous,
+                            selectedManualJobIds: event.target.checked
+                              ? previous.mergePreview?.manualJobs.map(job => job.jobId) || []
+                              : [],
+                          } : previous)}
+                        />
+                        Chọn tất cả
+                      </label>
+                    </div>
+                    <div style={{ maxHeight: '230px', overflowY: 'auto', background: '#fff' }}>
+                      {overlapWarningData.mergePreview.manualJobs.map((job, index) => {
+                        const checked = overlapWarningData.selectedManualJobIds.includes(job.jobId)
+                        return (
+                          <label key={job.jobId} style={{
+                            display: 'grid',
+                            gridTemplateColumns: '20px minmax(110px, .7fr) minmax(140px, 1fr) minmax(180px, 1.4fr)',
+                            gap: '10px',
+                            alignItems: 'start',
+                            padding: '10px 12px',
+                            borderTop: index === 0 ? '1px solid #fde68a' : '1px solid #f1f5f9',
+                            cursor: 'pointer',
+                            background: checked ? '#fff7ed' : '#fff',
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setOverlapWarningData(previous => previous ? {
+                                ...previous,
+                                selectedManualJobIds: previous.selectedManualJobIds.includes(job.jobId)
+                                  ? previous.selectedManualJobIds.filter(id => id !== job.jobId)
+                                  : [...previous.selectedManualJobIds, job.jobId],
+                              } : previous)}
+                            />
+                            <div style={{ fontSize: '12px', fontWeight: 800, color: '#0f172a' }}>
+                              {job.jobNo}
+                              <div style={{ marginTop: 2, fontSize: '11px', fontWeight: 500, color: '#64748b' }}>{job.salesRep || 'Chưa có Sales'}</div>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#475569', wordBreak: 'break-word' }}>
+                              {job.sourceFilename}
+                              <div style={{ marginTop: 2, color: '#64748b' }}>{job.periodLabel}</div>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#92400e' }}>{job.reasons.join(' · ') || 'Đã sửa thủ công'}</div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: '10px 12px', borderRadius: '9px', background: '#ecfdf5', color: '#047857', fontSize: '12.5px', fontWeight: 650 }}>
+                    Không có JOB đã sửa thủ công. JOB trùng sẽ được cập nhật và JOB mới sẽ được thêm tự động.
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ fontSize: '13.5px', color: '#475569', fontWeight: 500 }}>
-              Bạn có chắc chắn muốn tiếp tục import trùng không?
+              {overlapWarningData.onMerge
+                ? 'Hãy kiểm tra lựa chọn rồi cập nhật vào kỳ hiện tại. JOB thủ công không chọn sẽ giữ nguyên dữ liệu cũ.'
+                : 'Khoảng ngày chỉ trùng một phần nên không thể gộp theo JOB. Bạn có muốn lưu thành một kỳ riêng không?'}
             </div>
 
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '4px' }}>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: '4px' }}>
               <button
                 onClick={() => setOverlapWarningData(null)}
                 style={{
@@ -2890,13 +4083,10 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
               >
                 Hủy bỏ
               </button>
-              {overlapWarningData.conflicts.some(c => c.isExact) && (
+              {overlapWarningData.onMerge && overlapWarningData.conflicts.some(c => c.isExact) && (
                 <button
                   onClick={() => {
-                    const exact = overlapWarningData.conflicts.find(c => c.isExact)
-                    if (exact && overlapWarningData.onUpdate) {
-                      overlapWarningData.onUpdate(exact.id)
-                    }
+                    overlapWarningData.onMerge?.(overlapWarningData.selectedManualJobIds)
                   }}
                   style={{
                     height: '38px',
@@ -2911,7 +4101,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                     boxShadow: '0 4px 12px rgba(2,132,199,0.2)',
                   }}
                 >
-                  Cập nhật (Ghi đè)
+                  Cập nhật kỳ hiện tại
                 </button>
               )}
               <button
@@ -2929,7 +4119,7 @@ export function CommissionTab({ apiBase, token, notificationFocus }: Props) {
                   boxShadow: '0 4px 12px rgba(220,38,38,0.2)',
                 }}
               >
-                Tiếp tục import
+                {overlapWarningData.onMerge ? 'Lưu thành kỳ riêng' : 'Tiếp tục import'}
               </button>
             </div>
           </div>

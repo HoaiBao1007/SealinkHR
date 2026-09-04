@@ -25,6 +25,8 @@ from app.api.role_dashboard import router as role_dashboard_router
 from app.api.access_api import router as access_router
 from app.api.notifications import router as notifications_router
 from app.api.time_off import router as time_off_router
+from app.api.onboarding import router as onboarding_router
+from app.api.offboarding import router as offboarding_router
 from app.core.settings import settings
 from app.middleware.audit import audit_mutating_request
 
@@ -61,6 +63,8 @@ app.include_router(role_dashboard_router)
 app.include_router(access_router)
 app.include_router(notifications_router)
 app.include_router(time_off_router)
+app.include_router(onboarding_router)
+app.include_router(offboarding_router)
 
 
 @app.get("/health")

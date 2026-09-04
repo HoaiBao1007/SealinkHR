@@ -102,8 +102,38 @@ def test_build_final_timesheet_report_applies_hr_rules_and_summary():
     assert row.total_work_days == 2.0
     assert row.paid_leave_days == 2.0
     assert row.unpaid_leave_days == 1.0
-    # Template Final deducts Ro while the balance remains non-negative.
-    assert row.remaining_paid_leave_days == 0.0
+    # Ro là nghỉ không lương, không tiêu hao quỹ phép hưởng lương.
+    assert row.remaining_paid_leave_days == 1.0
+
+
+def test_accountant_payroll_days_are_preserved_separately_from_actual_days():
+    report = build_final_timesheet_report(
+        period_start=date(2026, 8, 20),
+        period_end=date(2026, 8, 22),
+        employees=[
+            FinalTimesheetEmployeeInput(
+                employee_id=1,
+                machine_employee_id="8",
+                full_name="Pham Do Hanh Quyen",
+                stored_total_work_days=20,
+                stored_total_payroll_days=23,
+                stored_total_paid_leave_days=2.5,
+                prefer_stored_totals=True,
+            )
+        ],
+        daily_records=[],
+    )
+
+    row = report.rows[0]
+    assert row.total_work_days == 20
+    assert row.total_payroll_days == 23
+    assert row.paid_leave_days == 2.5
+
+    workbook = load_workbook(BytesIO(export_to_final_timesheet(report).getvalue()))
+    sheet = workbook["Timesheet"]
+    # A/B = identity, C:E = 3 dates, F = spacer, G/H = Ngày công/Ngày công TT.
+    assert sheet["G8"].value == 23
+    assert sheet["H8"].value == 20
 
 
 def test_weekend_notion_leave_is_blank_and_continues_on_next_workday():
@@ -228,7 +258,7 @@ def test_weekend_is_blank_even_with_punches_and_manual_override():
     assert row.total_work_days == 0
 
 
-def test_build_final_timesheet_report_respects_existing_work_symbol_without_times():
+def test_work_symbol_without_machine_punch_is_payable_but_not_actual_attendance():
     report = build_final_timesheet_report(
         period_start=date(2026, 4, 23),
         period_end=date(2026, 5, 22),
@@ -252,7 +282,51 @@ def test_build_final_timesheet_report_respects_existing_work_symbol_without_time
 
     row = report.rows[0]
     assert row.days["2026-04-30"] == "X"
+    assert row.total_work_days == 0.0
+    assert row.total_payroll_days == 1.0
+
+
+def test_payroll_days_include_clocked_work_paid_leave_and_wfh():
+    report = build_final_timesheet_report(
+        period_start=date(2026, 8, 3),
+        period_end=date(2026, 8, 5),
+        employees=[
+            FinalTimesheetEmployeeInput(
+                employee_id=1,
+                machine_employee_id="E001",
+                full_name="Nguyen Van A",
+            )
+        ],
+        daily_records=[
+            FinalTimesheetDailyInput(
+                employee_id=1,
+                work_date=date(2026, 8, 3),
+                attendance_symbol="X",
+                check_in_time="08:30",
+                check_out_time="17:30",
+            ),
+            # WFH is stored as X without machine punches.
+            FinalTimesheetDailyInput(
+                employee_id=1,
+                work_date=date(2026, 8, 4),
+                attendance_symbol="X",
+            ),
+        ],
+        off_requests=[
+            FinalTimesheetOffRequestInput(
+                employee_id=1,
+                request_type="paid_leave",
+                start_date=date(2026, 8, 5),
+                end_date=date(2026, 8, 5),
+                total_days=1,
+            )
+        ],
+    )
+
+    row = report.rows[0]
     assert row.total_work_days == 1.0
+    assert row.paid_leave_days == 1.0
+    assert row.total_payroll_days == 3.0
 
 
 def test_build_final_timesheet_report_marks_single_punch_day_as_worked():
@@ -403,4 +477,135 @@ def test_build_final_timesheet_report_half_day_leave_with_units_and_attendance()
     assert row.total_work_days == 0.5
     assert row.paid_leave_days == 0.5
     assert row.unpaid_leave_days == 0.0
+
+
+def test_paid_leave_balance_rolls_forward_from_july_to_august_without_deducting_unpaid_leave():
+    july_report = build_final_timesheet_report(
+        period_start=date(2026, 6, 23),
+        period_end=date(2026, 7, 22),
+        daily_records=[],
+        employees=[
+            FinalTimesheetEmployeeInput(
+                employee_id=1,
+                machine_employee_id="E001",
+                full_name="Nguyen Van A",
+                previous_paid_leave_balance=5,
+                current_month_paid_leave_credit=1,
+            )
+        ],
+        off_requests=[
+            FinalTimesheetOffRequestInput(
+                employee_id=1,
+                request_type="paid_leave",
+                start_date=date(2026, 7, 6),
+                end_date=date(2026, 7, 6),
+                total_days=1,
+            ),
+            FinalTimesheetOffRequestInput(
+                employee_id=1,
+                request_type="unpaid_leave",
+                start_date=date(2026, 7, 7),
+                end_date=date(2026, 7, 7),
+                total_days=1,
+            ),
+        ],
+    )
+    july_row = july_report.rows[0]
+    assert july_row.paid_leave_days == 1
+    assert july_row.unpaid_leave_days == 1
+    assert july_row.remaining_paid_leave_days == 5
+
+    august_report = build_final_timesheet_report(
+        period_start=date(2026, 7, 23),
+        period_end=date(2026, 8, 22),
+        daily_records=[],
+        employees=[
+            FinalTimesheetEmployeeInput(
+                employee_id=1,
+                machine_employee_id="E001",
+                full_name="Nguyen Van A",
+                previous_paid_leave_balance=july_row.remaining_paid_leave_days,
+                current_month_paid_leave_credit=1,
+            )
+        ],
+        off_requests=[
+            FinalTimesheetOffRequestInput(
+                employee_id=1,
+                request_type="paid_leave",
+                start_date=date(2026, 8, 3),
+                end_date=date(2026, 8, 3),
+                total_days=0.5,
+            )
+        ],
+    )
+    august_row = august_report.rows[0]
+    assert august_row.previous_paid_leave_balance == 5
+    assert august_row.paid_leave_days == 0.5
+    assert august_row.remaining_paid_leave_days == 5.5
+
+
+def test_single_saturday_working_day_override_does_not_change_other_weekends():
+    report = build_final_timesheet_report(
+        period_start=date(2026, 8, 15),
+        period_end=date(2026, 8, 22),
+        employees=[
+            FinalTimesheetEmployeeInput(
+                employee_id=1,
+                machine_employee_id="E001",
+                full_name="Nguyen Van A",
+            )
+        ],
+        daily_records=[
+            FinalTimesheetDailyInput(
+                employee_id=1,
+                work_date=date(2026, 8, 15),
+                attendance_symbol="X",
+            ),
+            FinalTimesheetDailyInput(
+                employee_id=1,
+                work_date=date(2026, 8, 22),
+                attendance_symbol="X",
+                check_in_time="08:30",
+                check_out_time="17:30",
+            ),
+        ],
+        working_day_overrides={date(2026, 8, 22)},
+    )
+
+    row = report.rows[0]
+    assert row.days["2026-08-15"] == ""
+    assert row.days["2026-08-22"] == "X"
+    assert row.total_work_days == 1
+
+
+def test_accountant_blank_override_stays_blank_on_a_weekday():
+    report = build_final_timesheet_report(
+        period_start=date(2026, 8, 3),
+        period_end=date(2026, 8, 3),
+        employees=[
+            FinalTimesheetEmployeeInput(
+                employee_id=1,
+                machine_employee_id="E001",
+                full_name="New Employee",
+            )
+        ],
+        daily_records=[
+            FinalTimesheetDailyInput(
+                employee_id=1,
+                work_date=date(2026, 8, 3),
+                attendance_symbol="",
+            )
+        ],
+        entry_records=[
+            FinalTimesheetEntryInput(
+                employee_id=1,
+                work_date=date(2026, 8, 3),
+                final_symbol="",
+                is_overridden=True,
+                override_reason="Kế toán duyệt để trống",
+            )
+        ],
+    )
+
+    assert report.rows[0].days["2026-08-03"] == ""
 

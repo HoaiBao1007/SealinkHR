@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import logoSealink from '../../assets/LOGO SEALINK.jpg'
+import { AppIcon } from '../../shared/ui/AppIcon'
 import './OrganizationChart.css'
 
 type ApiRequest = (path: string, init?: RequestInit) => Promise<Response>
@@ -631,7 +632,7 @@ export function OrganizationChart({
             aria-pressed={isFullscreen}
             title={isFullscreen ? 'Thoát toàn màn hình (Esc)' : 'Mở toàn màn hình'}
           >
-            <span aria-hidden="true">⛶</span>
+            <AppIcon name="expand" size={16} />
           </button>
           <div className="org-chart-zoom" aria-label="Mức phóng sơ đồ">
             <button
@@ -658,7 +659,7 @@ export function OrganizationChart({
           <button className="org-chart-action-button" type="button" onClick={loadChart}>
             Làm mới
           </button>
-          <button className="org-chart-action-button" type="button" onClick={exportPdf} disabled={exporting}>
+          <button className="org-chart-action-button app-download-button" type="button" onClick={exportPdf} disabled={exporting}>
             {exporting ? 'Đang xuất...' : 'Xuất PDF'}
           </button>
         </div>

@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_admin_user
@@ -14,7 +15,9 @@ from app.models.employee import Employee
 from app.models.monthly_salary_input import MonthlySalaryInput
 from app.models.salary_policy import SalaryPolicy
 from app.models.salary_decision import SalaryDecision
+from app.models.salary_approval_workflow import SalaryApprovalWorkflow
 from app.models.user import User
+from app.core.roles import ADMIN, DIRECTOR, IT_ADMIN
 from app.schemas.salary_schemas import (
     EmployeeSalaryUpdate,
     EmployeeSalaryResponse,
@@ -35,12 +38,17 @@ from app.core.employee_type import (
     apply_monthly_allowance_defaults,
     normalize_employee_type,
 )
-from app.services.notification_service import PAYROLL, actor_id, add_employee_notifications
+from app.services.notification_service import PAYROLL, actor_id, add_employee_notifications, add_notification
 from app.services.salary_policy import (
     DEFAULT_PIT_BRACKETS,
     ensure_default_salary_policy,
     policy_to_dict,
     resolve_salary_policy,
+)
+from app.services.employee_visibility import (
+    salary_period_payable_days,
+    salary_period_working_employee_ids,
+    should_include_employee_in_salary_period,
 )
 
 router = APIRouter(prefix="/api/salary", tags=["salary"], dependencies=[Depends(get_admin_user)])
@@ -95,6 +103,10 @@ class SalaryPolicyCreate(BaseModel):
     pit_brackets: List[SalaryTaxBracketPayload] = Field(default_factory=lambda: [SalaryTaxBracketPayload(**item) for item in DEFAULT_PIT_BRACKETS])
 
 
+class SalaryApprovalPayload(BaseModel):
+    period: str = Field(pattern=r"^\d{4}-\d{2}$")
+
+
 def _other_income_response_fields(item: MonthlySalaryInput) -> dict:
     return {
         "other_income_note": item.other_income_note,
@@ -103,6 +115,162 @@ def _other_income_response_fields(item: MonthlySalaryInput) -> dict:
         "other_income_document_size": item.other_income_document_size,
         "other_income_document_uploaded_at": item.other_income_document_uploaded_at,
     }
+
+
+APPROVAL_DRAFT = "DRAFT"
+APPROVAL_CONFIRMED = "CONFIRMED"
+APPROVAL_PENDING = "PENDING_APPROVAL"
+APPROVAL_APPROVED = "APPROVED"
+
+
+def _require_salary_role(current_user: User, allowed: set[str], message: str) -> None:
+    if str(current_user.role or "").upper() not in allowed:
+        raise HTTPException(status_code=403, detail=message)
+
+
+def _persisted_actor_id(db: Session, current_user: User) -> int | None:
+    """Only persist actor IDs that exist in this database.
+
+    Keeping this check here also makes dependency-overridden API tests safe while
+    preserving the foreign-key guarantees used in production.
+    """
+    candidate = actor_id(current_user)
+    if candidate is None:
+        return None
+    return candidate if db.query(User.id).filter(User.id == candidate).first() else None
+
+
+def _get_or_create_approval(db: Session, period: str) -> SalaryApprovalWorkflow:
+    workflow = db.query(SalaryApprovalWorkflow).filter(SalaryApprovalWorkflow.salary_period == period).first()
+    if workflow:
+        return workflow
+    was_published = db.query(MonthlySalaryInput.id).filter(
+        MonthlySalaryInput.salary_period == period,
+        MonthlySalaryInput.is_published.is_(True),
+    ).first()
+    workflow = SalaryApprovalWorkflow(
+        salary_period=period,
+        status=APPROVAL_APPROVED if was_published else APPROVAL_DRAFT,
+    )
+    db.add(workflow)
+    db.flush()
+    return workflow
+
+
+def _approval_response(workflow: SalaryApprovalWorkflow) -> dict:
+    return {
+        "period": workflow.salary_period,
+        "status": workflow.status,
+        "confirmed_by_user_id": workflow.confirmed_by_user_id,
+        "confirmed_at": workflow.confirmed_at,
+        "requested_by_user_id": workflow.requested_by_user_id,
+        "requested_at": workflow.requested_at,
+        "approved_by_user_id": workflow.approved_by_user_id,
+        "approved_at": workflow.approved_at,
+    }
+
+
+def _ensure_salary_period_editable(db: Session, period: str) -> None:
+    """Payroll values remain editable after confirmation/publication.
+
+    Publication controls payslip visibility and approval metadata; it is not a
+    write lock. Keeping this hook makes the intent explicit at every mutation
+    endpoint and leaves room for authorization checks without reintroducing a
+    status-based lock.
+    """
+    return None
+
+
+def _ensure_salary_period_deletable(db: Session, period: str) -> None:
+    """Prevent destructive removal of an issued payroll record."""
+    workflow = db.query(SalaryApprovalWorkflow).filter(SalaryApprovalWorkflow.salary_period == period).first()
+    published = db.query(MonthlySalaryInput.id).filter(
+        MonthlySalaryInput.salary_period == period,
+        MonthlySalaryInput.is_published.is_(True),
+    ).first()
+    if published or (workflow and workflow.status != APPROVAL_DRAFT):
+        raise HTTPException(status_code=409, detail="Kỳ lương đã được xác nhận hoặc phát hành nên không thể xóa dữ liệu")
+
+
+def _materialize_salary_inputs(db: Session, period: str) -> dict[int, MonthlySalaryInput]:
+    working_employee_ids = salary_period_working_employee_ids(db, period)
+    employees = [
+        employee
+        for employee in db.query(Employee).all()
+        if should_include_employee_in_salary_period(employee, period, working_employee_ids)
+    ]
+    eligible_employee_ids = {employee.id for employee in employees}
+    existing_inputs = db.query(MonthlySalaryInput).filter(MonthlySalaryInput.salary_period == period).all()
+    existing_by_emp = {
+        item.employee_id: item
+        for item in existing_inputs
+        if item.employee_id in eligible_employee_ids
+    }
+    for emp in employees:
+        existing_item = existing_by_emp.get(emp.id)
+        if existing_item is not None:
+            if not existing_item.is_published:
+                existing_item.actual_working_days = salary_period_payable_days(db, emp.id, period)
+            continue
+        blended_data = get_blended_salary_for_period(db, emp.id, period, emp.contract_salary)
+        item = MonthlySalaryInput(
+            employee_id=emp.id,
+            salary_period=period,
+            salary_policy_id=resolve_salary_policy(db, period).id,
+            actual_working_days=salary_period_payable_days(db, emp.id, period),
+            meal_allowance_free=emp.meal_allowance,
+            meal_allowance_tax=0,
+            phone_allowance_free=emp.phone_allowance,
+            trans_allowance_tax=emp.trans_allowance,
+            perf_allowance_tax=emp.other_allowance,
+            other_income=0,
+            bonus=0,
+            bonus_14=0,
+            advance_payment=0,
+            pit_refund=0,
+            other_deductions=0,
+            is_mid_month_change=blended_data.get("is_mid_month_change", False),
+            prorated_old_salary=blended_data.get("prorated_old_salary"),
+            prorated_new_salary=blended_data.get("prorated_new_salary"),
+            prorated_days_old=blended_data.get("prorated_days_old"),
+            prorated_days_new=blended_data.get("prorated_days_new"),
+            mid_month_effective_date=blended_data.get("effective_date_str"),
+            contract_salary=blended_data.get("blended_salary", emp.contract_salary),
+            fullname=emp.full_name,
+            position=emp.position,
+            employee_type=emp.employee_type,
+            dependents_count=emp.dependents_count,
+            account_number=emp.account_number,
+            bank_name=emp.bank_name,
+        )
+        db.add(item)
+        existing_by_emp[emp.id] = item
+    db.flush()
+    return existing_by_emp
+
+
+def _publish_salary_period(db: Session, period: str, current_user: User) -> int:
+    inputs = _materialize_salary_inputs(db, period)
+    newly_published_ids: list[int] = []
+    for item in inputs.values():
+        if not item.is_published:
+            newly_published_ids.append(item.employee_id)
+        item.is_published = True
+    if newly_published_ids:
+        employees = db.query(Employee).filter(Employee.id.in_(newly_published_ids), Employee.user_id.isnot(None)).all()
+        add_employee_notifications(
+            db,
+            employees,
+            category=PAYROLL,
+            event_type="PAYSLIP_PUBLISHED",
+            title=f"Phiếu lương tháng {period[5:7]}/{period[:4]} đã phát hành",
+            message="Bảng lương đã được phê duyệt và phiếu lương đã phát hành. Bạn có thể mở Phiếu lương cá nhân để xem và tải PDF.",
+            actor_user_id=_persisted_actor_id(db, current_user),
+            resource_type="SALARY_PERIOD",
+            resource_id=period,
+            action_url="/user/my-payslip",
+        )
+    return len(inputs)
 
 
 @router.get("/policies")
@@ -126,10 +294,15 @@ def get_effective_salary_policy(
 ):
     """Resolve the policy for a payroll month, preferring that month's snapshot."""
     ensure_default_salary_policy(db)
+    # A payroll month has one input row per employee.  ``Query.scalar()``
+    # without a SQL LIMIT calls ``one()`` and therefore crashes as soon as a
+    # second employee has the same policy snapshot.  Limit the ordered query
+    # to the first monthly snapshot; every row in a materialised period is
+    # intentionally attached to that same policy version.
     saved_policy_id = db.query(MonthlySalaryInput.salary_policy_id).filter(
         MonthlySalaryInput.salary_period == period,
         MonthlySalaryInput.salary_policy_id.is_not(None),
-    ).order_by(MonthlySalaryInput.id.asc()).scalar()
+    ).order_by(MonthlySalaryInput.id.asc()).limit(1).scalar()
     policy = db.get(SalaryPolicy, saved_policy_id) if saved_policy_id else None
     legacy_published = db.query(MonthlySalaryInput.id).filter(
         MonthlySalaryInput.salary_period == period,
@@ -225,7 +398,7 @@ def _get_or_create_monthly_input(
         employee_id=employee.id,
         salary_period=period,
         salary_policy_id=resolve_salary_policy(db, period).id,
-        actual_working_days=22.0,
+        actual_working_days=salary_period_payable_days(db, employee.id, period),
         meal_allowance_free=period_compensation["meal_allowance"],
         meal_allowance_tax=0,
         phone_allowance_free=period_compensation["phone_allowance"],
@@ -288,6 +461,7 @@ def list_employees_salary(
             | (Employee.machine_employee_id.ilike(keyword))
         )
     results = query.order_by(Employee.id.asc()).all()
+    working_employee_ids = salary_period_working_employee_ids(db, period) if period else set()
     
     # Map model objects to the schema
     response_data = []
@@ -298,22 +472,8 @@ def list_employees_salary(
             emp, m_input = row, None
             
         if period:
-            # If there's an existing salary input record, always show them to protect historical inputs.
-            if m_input is None:
-                # Filter by start date: hide if start date is in a future period
-                if emp.start_date:
-                    start_period = emp.start_date.strftime("%Y-%m")
-                    if start_period > period:
-                        continue
-                
-                # Filter by resignation period: hide if resignation period is in the past/present
-                if emp.status == 'RESIGNED':
-                    if emp.resignation_period:
-                        if emp.resignation_period <= period:
-                            continue
-                    else:
-                        # Resigned with no period set (fallback to hiding)
-                        continue
+            if not should_include_employee_in_salary_period(emp, period, working_employee_ids):
+                continue
 
         # Apply overrides from MonthlySalaryInput if present
         fullname = emp.full_name
@@ -449,7 +609,7 @@ def update_employee_salary(
                 employee_id=employee_id,
                 salary_period=period,
                 salary_policy_id=resolve_salary_policy(db, period).id,
-                actual_working_days=22.0,
+                actual_working_days=salary_period_payable_days(db, employee_id, period),
                 meal_allowance_free=resolve_employee_type_for_period(db, employee, period)["meal_allowance"],
                 meal_allowance_tax=0,
                 phone_allowance_free=resolve_employee_type_for_period(db, employee, period)["phone_allowance"],
@@ -645,25 +805,17 @@ def list_monthly_salary_inputs(
     if period:
         employees = db.query(Employee).order_by(Employee.id.asc()).all()
         existing_inputs_map = {item.employee_id: item for item in inputs}
+        working_employee_ids = salary_period_working_employee_ids(db, period)
         
         response_data = []
         import datetime
         now = datetime.datetime.now()
         
         for emp in employees:
+            if not should_include_employee_in_salary_period(emp, period, working_employee_ids):
+                continue
             period_compensation = resolve_employee_type_for_period(db, emp, period)
             has_input = emp.id in existing_inputs_map
-            if not has_input:
-                if emp.start_date:
-                    start_period = emp.start_date.strftime("%Y-%m")
-                    if start_period > period:
-                        continue
-                if emp.status == 'RESIGNED':
-                    if emp.resignation_period:
-                        if emp.resignation_period <= period:
-                            continue
-                    else:
-                        continue
             
             sales_bonus = round(get_sales_bonus_for_employee_period(db, emp.id, period), 2)
             
@@ -684,6 +836,7 @@ def list_monthly_salary_inputs(
                         employee_name=item.employee.full_name if item.employee else emp.full_name,
                         employee_code=item.employee.employee_code if item.employee else emp.employee_code,
                         salary_period=item.salary_period,
+                        is_published=bool(item.is_published),
                         actual_working_days=item.actual_working_days,
                         meal_allowance_free=period_compensation["meal_allowance"] if use_type_snapshot else item.meal_allowance_free,
                         meal_allowance_tax=item.meal_allowance_tax,
@@ -710,7 +863,7 @@ def list_monthly_salary_inputs(
                         employee_name=emp.full_name,
                         employee_code=emp.employee_code,
                         salary_period=period,
-                        actual_working_days=22.0,
+                        actual_working_days=salary_period_payable_days(db, emp.id, period),
                         meal_allowance_free=period_compensation["meal_allowance"],
                         meal_allowance_tax=0,
                         phone_allowance_free=period_compensation["phone_allowance"],
@@ -744,6 +897,7 @@ def list_monthly_salary_inputs(
                 employee_name=item.employee.full_name if item.employee else None,
                 employee_code=item.employee.employee_code if item.employee else None,
                 salary_period=item.salary_period,
+                is_published=bool(item.is_published),
                 actual_working_days=item.actual_working_days,
                 meal_allowance_free=item.meal_allowance_free,
                 meal_allowance_tax=item.meal_allowance_tax,
@@ -765,6 +919,161 @@ def list_monthly_salary_inputs(
     return response_data
 
 
+@router.get("/periods")
+def list_salary_periods(db: Session = Depends(get_db)):
+    """Return compact payroll-period metadata for the shared month/year picker."""
+    rows = (
+        db.query(
+            MonthlySalaryInput.salary_period,
+            func.max(MonthlySalaryInput.is_published).label("is_published"),
+            func.count(MonthlySalaryInput.id).label("input_count"),
+        )
+        .group_by(MonthlySalaryInput.salary_period)
+        .order_by(MonthlySalaryInput.salary_period.desc())
+        .all()
+    )
+    workflows = {
+        item.salary_period: item.status
+        for item in db.query(SalaryApprovalWorkflow).filter(
+            SalaryApprovalWorkflow.salary_period.in_([str(row.salary_period) for row in rows])
+        ).all()
+    }
+    return [
+        {
+            "period": str(period),
+            "is_published": bool(is_published),
+            "input_count": int(input_count or 0),
+            "approval_status": workflows.get(
+                str(period), APPROVAL_APPROVED if bool(is_published) else APPROVAL_DRAFT
+            ),
+        }
+        for period, is_published, input_count in rows
+    ]
+
+
+@router.get("/approval")
+def get_salary_approval(
+    period: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    db: Session = Depends(get_db),
+):
+    workflow = _get_or_create_approval(db, period)
+    db.commit()
+    db.refresh(workflow)
+    return _approval_response(workflow)
+
+
+@router.post("/approval/confirm")
+def confirm_salary_period(
+    payload: SalaryApprovalPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    _require_salary_role(
+        current_user,
+        {ADMIN},
+        "Chỉ Kế toán trưởng được xác nhận bảng lương",
+    )
+    workflow = _get_or_create_approval(db, payload.period)
+    if workflow.status != APPROVAL_DRAFT:
+        raise HTTPException(status_code=409, detail="Bảng lương không còn ở trạng thái bản nháp")
+
+    inputs = _materialize_salary_inputs(db, payload.period)
+    workflow.status = APPROVAL_CONFIRMED
+    workflow.confirmed_by_user_id = _persisted_actor_id(db, current_user)
+    workflow.confirmed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(workflow)
+    return {**_approval_response(workflow), "input_count": len(inputs)}
+
+
+@router.post("/approval/request")
+def request_salary_approval(
+    payload: SalaryApprovalPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    _require_salary_role(
+        current_user,
+        {ADMIN},
+        "Chỉ Kế toán trưởng được gửi yêu cầu phê duyệt",
+    )
+    workflow = _get_or_create_approval(db, payload.period)
+    if workflow.status != APPROVAL_CONFIRMED:
+        raise HTTPException(
+            status_code=409,
+            detail="Kế toán trưởng phải xác nhận bảng lương trước khi gửi yêu cầu phê duyệt",
+        )
+
+    persisted_actor = _persisted_actor_id(db, current_user)
+    workflow.status = APPROVAL_PENDING
+    workflow.requested_by_user_id = persisted_actor
+    workflow.requested_at = datetime.now(timezone.utc)
+
+    recipients = db.query(User).filter(func.upper(User.role).in_([DIRECTOR, IT_ADMIN])).all()
+    for recipient in recipients:
+        add_notification(
+            db,
+            category=PAYROLL,
+            event_type="PAYROLL_APPROVAL_REQUESTED",
+            title=f"Yêu cầu phê duyệt bảng lương tháng {payload.period[5:7]}/{payload.period[:4]}",
+            message="Kế toán trưởng đã xác nhận bảng lương và đang chờ Giám đốc hoặc IT phê duyệt để phát hành phiếu lương.",
+            target_user_id=recipient.id,
+            actor_user_id=persisted_actor,
+            resource_type="SALARY_PERIOD",
+            resource_id=payload.period,
+            action_url="/admin/salary-matrix",
+        )
+
+    db.commit()
+    db.refresh(workflow)
+    return {**_approval_response(workflow), "notified_count": len(recipients)}
+
+
+@router.post("/approval/approve")
+def approve_salary_period(
+    payload: SalaryApprovalPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    _require_salary_role(
+        current_user,
+        {DIRECTOR, IT_ADMIN},
+        "Chỉ Giám đốc hoặc IT_ADMIN được phê duyệt bảng lương",
+    )
+    workflow = _get_or_create_approval(db, payload.period)
+    if workflow.status != APPROVAL_PENDING:
+        raise HTTPException(status_code=409, detail="Bảng lương chưa có yêu cầu phê duyệt hợp lệ")
+
+    published_count = _publish_salary_period(db, payload.period, current_user)
+    persisted_actor = _persisted_actor_id(db, current_user)
+    workflow.status = APPROVAL_APPROVED
+    workflow.approved_by_user_id = persisted_actor
+    workflow.approved_at = datetime.now(timezone.utc)
+
+    requester_ids = {
+        user_id
+        for user_id in (workflow.confirmed_by_user_id, workflow.requested_by_user_id)
+        if user_id is not None and user_id != persisted_actor
+    }
+    for requester_id in requester_ids:
+        add_notification(
+            db,
+            category=PAYROLL,
+            event_type="PAYROLL_APPROVED",
+            title=f"Bảng lương tháng {payload.period[5:7]}/{payload.period[:4]} đã được phê duyệt",
+            message="Bảng lương đã được phê duyệt; phiếu lương đã tự động phát hành tới nhân viên.",
+            target_user_id=requester_id,
+            actor_user_id=persisted_actor,
+            resource_type="SALARY_PERIOD",
+            resource_id=payload.period,
+            action_url="/admin/salary-matrix",
+        )
+
+    db.commit()
+    db.refresh(workflow)
+    return {**_approval_response(workflow), "published_count": published_count}
+
+
 @router.post("/inputs", response_model=List[MonthlySalaryInputResponse])
 def upsert_monthly_salary_inputs(
     payload: Union[List[MonthlySalaryInputCreate], MonthlySalaryInputCreate],
@@ -772,6 +1081,9 @@ def upsert_monthly_salary_inputs(
 ):
     items_to_process = payload if isinstance(payload, list) else [payload]
     results = []
+
+    for salary_period in {item.salary_period for item in items_to_process}:
+        _ensure_salary_period_editable(db, salary_period)
 
     for item in items_to_process:
         # Check if employee exists
@@ -800,12 +1112,17 @@ def upsert_monthly_salary_inputs(
             db_item = existing
         else:
             blended_data = get_blended_salary_for_period(db, employee.id, item.salary_period, employee.contract_salary)
+            actual_working_days = (
+                item.actual_working_days
+                if "actual_working_days" in item.model_fields_set
+                else salary_period_payable_days(db, employee.id, item.salary_period)
+            )
             # Create new
             db_item = MonthlySalaryInput(
                 employee_id=item.employee_id,
                 salary_period=item.salary_period,
                 salary_policy_id=resolve_salary_policy(db, item.salary_period).id,
-                actual_working_days=item.actual_working_days,
+                actual_working_days=actual_working_days,
                 meal_allowance_free=item.meal_allowance_free,
                 meal_allowance_tax=item.meal_allowance_tax,
                 phone_allowance_free=item.phone_allowance_free,
@@ -842,6 +1159,7 @@ def upsert_monthly_salary_inputs(
                 employee_name=item.employee.full_name if item.employee else None,
                 employee_code=item.employee.employee_code if item.employee else None,
                 salary_period=item.salary_period,
+                is_published=bool(item.is_published),
                 actual_working_days=item.actual_working_days,
                 meal_allowance_free=item.meal_allowance_free,
                 meal_allowance_tax=item.meal_allowance_tax,
@@ -879,6 +1197,7 @@ async def save_other_income_evidence(
     db: Session = Depends(get_db),
 ):
     """Save the manual other-income amount, explanation and optional private evidence."""
+    _ensure_salary_period_editable(db, period)
     employee = db.query(Employee).filter(Employee.id == employee_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Không tìm thấy nhân viên")
@@ -971,6 +1290,7 @@ def delete_other_income_evidence(
     period: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: Session = Depends(get_db),
 ):
+    _ensure_salary_period_deletable(db, period)
     item = db.query(MonthlySalaryInput).filter(
         MonthlySalaryInput.employee_id == employee_id,
         MonthlySalaryInput.salary_period == period,
@@ -998,6 +1318,8 @@ def update_monthly_salary_input(
     if not item:
         raise HTTPException(status_code=404, detail="Monthly salary input record not found")
 
+    _ensure_salary_period_editable(db, item.salary_period)
+
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
 
@@ -1012,6 +1334,7 @@ def update_monthly_salary_input(
         employee_name=item.employee.full_name if item.employee else None,
         employee_code=item.employee.employee_code if item.employee else None,
         salary_period=item.salary_period,
+        is_published=bool(item.is_published),
         actual_working_days=item.actual_working_days,
         meal_allowance_free=item.meal_allowance_free,
         meal_allowance_tax=item.meal_allowance_tax,
@@ -1039,6 +1362,8 @@ def delete_monthly_salary_input(
     item = db.query(MonthlySalaryInput).filter(MonthlySalaryInput.id == input_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Monthly salary input record not found")
+
+    _ensure_salary_period_deletable(db, item.salary_period)
 
     evidence_path: Optional[Path] = None
     if item.other_income_document_path:
@@ -1087,85 +1412,7 @@ def publish_payslips(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_admin_user),
 ):
-    employees = db.query(Employee).filter(Employee.is_active == True).all()
-    
-    # Also include inactive employees if they already have a drafted row for this period
-    # Or maybe just query all inputs first, and active employees.
-    existing_inputs = db.query(MonthlySalaryInput).filter(MonthlySalaryInput.salary_period == payload.period).all()
-    existing_by_emp = {item.employee_id: item for item in existing_inputs}
-
-    published_count = 0
-
-    for emp in employees:
-        m_input = existing_by_emp.get(emp.id)
-        if not m_input:
-            # Materialize the row since it hasn't been saved yet
-            blended_data = get_blended_salary_for_period(db, emp.id, payload.period, emp.contract_salary)
-            
-            m_input = MonthlySalaryInput(
-                employee_id=emp.id,
-                salary_period=payload.period,
-                salary_policy_id=resolve_salary_policy(db, payload.period).id,
-                actual_working_days=22.0,
-                meal_allowance_free=emp.meal_allowance,
-                meal_allowance_tax=0,
-                phone_allowance_free=emp.phone_allowance,
-                trans_allowance_tax=emp.trans_allowance,
-                perf_allowance_tax=emp.other_allowance,
-                other_income=0,
-                bonus=0,
-                bonus_14=0,
-                advance_payment=0,
-                pit_refund=0,
-                other_deductions=0,
-                is_mid_month_change=blended_data.get("is_mid_month_change", False),
-                prorated_old_salary=blended_data.get("prorated_old_salary"),
-                prorated_new_salary=blended_data.get("prorated_new_salary"),
-                prorated_days_old=blended_data.get("prorated_days_old"),
-                prorated_days_new=blended_data.get("prorated_days_new"),
-                mid_month_effective_date=blended_data.get("effective_date_str"),
-                contract_salary=blended_data.get("blended_salary", emp.contract_salary),
-                fullname=emp.full_name,
-                position=emp.position,
-                employee_type=emp.employee_type,
-                dependents_count=emp.dependents_count,
-                account_number=emp.account_number,
-                bank_name=emp.bank_name
-            )
-            db.add(m_input)
-            existing_by_emp[emp.id] = m_input
-
-    newly_published_employee_ids: list[int] = []
-    # Now toggle the is_published flag for all these inputs
-    for item in existing_by_emp.values():
-        if payload.is_published and not bool(item.is_published):
-            newly_published_employee_ids.append(item.employee_id)
-        item.is_published = payload.is_published
-        published_count += 1
-
-    if newly_published_employee_ids:
-        notification_employees = (
-            db.query(Employee)
-            .filter(Employee.id.in_(newly_published_employee_ids), Employee.user_id.isnot(None))
-            .all()
-        )
-        add_employee_notifications(
-            db,
-            notification_employees,
-            category=PAYROLL,
-            event_type="PAYSLIP_PUBLISHED",
-            title=f"Phiếu lương tháng {payload.period[5:7]}/{payload.period[:4]} đã phát hành",
-            message="Kế toán trưởng đã phát hành phiếu lương. Bạn có thể mở Phiếu lương cá nhân để xem và tải PDF.",
-            actor_user_id=actor_id(current_user),
-            resource_type="SALARY_PERIOD",
-            resource_id=payload.period,
-            action_url="/user/my-payslip",
-        )
-
-    db.commit()
-
-    return {
-        "status": "ok",
-        "published_count": published_count,
-        "is_published": payload.is_published,
-    }
+    raise HTTPException(
+        status_code=409,
+        detail="Không thể phát hành trực tiếp. Vui lòng dùng quy trình xác nhận, yêu cầu phê duyệt và phê duyệt bảng lương.",
+    )

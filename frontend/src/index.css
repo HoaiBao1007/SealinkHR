@@ -3,18 +3,24 @@
 @import 'tailwindcss/utilities.css' layer(utilities);
 
 :root {
-  --ink: #374151; /* Charcoal */
-  --ink-soft: #4b5563;
-  --muted: #6b7280;
-  --line: #e5e7eb;
-  --bg: #f8f9fa;
+  --ink: #14283a;
+  --ink-soft: #334e60;
+  --muted: #5b6d7b;
+  --line: #d7e2ea;
+  --bg: #f4f8fb;
   --surface: #ffffff;
-  --surface-muted: #f8fafc;
-  --brand: #163b66;
-  --brand-strong: #102b49;
-  --brand-soft: #eaf2fb;
-  --font-sans: 'Roboto', Arial, sans-serif;
-  --font-mono: 'Roboto', Arial, sans-serif;
+  --surface-muted: #f8fbfd;
+  --brand: #0879be;
+  --brand-strong: #065e98;
+  --brand-soft: #e8f4fc;
+  --button-primary-bg: #ffffff;
+  --button-primary-text: #1f2937;
+  --button-primary-border: #cbd5e1;
+  --button-primary-hover: #f1f5f9;
+  --button-primary-hover-text: #111827;
+  --button-primary-active: #e2e8f0;
+  --font-sans: "Roboto", "Segoe UI", Arial, sans-serif;
+  --font-mono: "Roboto", "Segoe UI", Arial, sans-serif;
 }
 
 * {
@@ -90,12 +96,12 @@ code {
 .ui-button:hover:not(:disabled) { border-color: #7f9bb8; box-shadow: 0 10px 22px -14px rgb(15 23 42 / 66%); transform: translateY(-2px); }
 .ui-button:active:not(:disabled) { transform: translateY(0); }
 .ui-button:focus-visible, .ui-input:focus-visible { outline: 2px solid #1e91ca; outline-offset: 2px; }
-.ui-button-primary { color: #fff; background: #1d4f82; }
-.ui-button-primary:hover { background: #163b66; }
+.ui-button-primary { color: var(--button-primary-text); background: var(--button-primary-bg); border-color: var(--button-primary-border); }
+.ui-button-primary:hover { color: var(--button-primary-hover-text); background: var(--button-primary-hover); border-color: #94a3b8; }
 .ui-button-secondary { color: #334155; background: #fff; border-color: #cbd5e1; }
 .ui-button-secondary:hover { background: #f8fafc; }
-.ui-button-danger { color: #fff; background: #dc2626; }
-.ui-button-danger:hover { background: #b91c1c; }
+.ui-button-danger { color: #b91c1c; background: #fff; border-color: #fca5a5; }
+.ui-button-danger:hover { color: #991b1b; background: #fff1f2; border-color: #ef4444; }
 .ui-input { width: 100%; padding: 0 12px; color: #1e293b; background: #fff; border: 1px solid #cbd5e1; }
 .ui-card { padding: 20px; background: linear-gradient(180deg, #fff 0%, #fbfdff 100%); border: 1px solid #dbe5f0; border-radius: 18px; box-shadow: 0 14px 32px -28px rgb(15 23 42 / 45%); }
 .ui-table-wrap { width: 100%; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 14px; }
@@ -115,6 +121,14 @@ code {
   background: rgb(15 23 42 / 6%);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+
+/* Confirmation dialogs can be opened from another portalled modal (for
+   example the Commission manual JOB editor at z-index 3200). Keep the
+   confirmation layer above its parent modal so the user can actually confirm
+   or cancel the save operation. */
+.ui-confirm-dialog-backdrop {
+  z-index: 10000;
 }
 
 /* Every portalled dialog uses the same light, transparent overlay. The page

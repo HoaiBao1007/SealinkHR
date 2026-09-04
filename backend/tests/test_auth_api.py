@@ -11,6 +11,17 @@ from app.services.trusted_device_service import TRUSTED_DEVICE_COOKIE, hash_devi
 from app.main import app
 
 
+def test_payslip_period_order_prefers_latest_completed_month():
+    from datetime import date
+
+    from app.api.user_portal import _order_payslip_periods_for_default
+
+    assert _order_payslip_periods_for_default(
+        ["2026-12", "2026-08", "2026-07", "2026-06", "2026-10"],
+        reference=date(2026, 8, 18),
+    ) == ["2026-07", "2026-06", "2026-12", "2026-10", "2026-08"]
+
+
 def test_it_admin_login_is_bound_to_registered_browser(client, db_session, monkeypatch):
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_admin_user, None)
@@ -198,11 +209,13 @@ def test_authentication_and_authorization_flow(client, db_session):
     # 2. Seed test data directly in the test session
     admin_pw = get_password_hash("admin123")
     user_pw = get_password_hash("password123")
+    director_pw = get_password_hash("director123")
 
     admin = User(username="admin_test", password_hash=admin_pw, role="ADMIN")
     regular = User(username="user_test", password_hash=user_pw, role="USER")
+    director = User(username="director_test", password_hash=director_pw, role="DIRECTOR")
     
-    db_session.add_all([admin, regular])
+    db_session.add_all([admin, regular, director])
     db_session.commit()
     db_session.refresh(admin)
     db_session.refresh(regular)
@@ -252,9 +265,14 @@ def test_authentication_and_authorization_flow(client, db_session):
     assert user_data["fullname"] == "Hoaibao Test"
     user_token = user_data["access_token"]
 
+    login_res = client.post("/api/auth/login", json={"username": "director_test", "password": "director123"})
+    assert login_res.status_code == 200
+    director_token = login_res.json()["access_token"]
+
     # --- Test Profile ---
     headers_admin = {"Authorization": f"Bearer {admin_token}"}
     headers_user = {"Authorization": f"Bearer {user_token}"}
+    headers_director = {"Authorization": f"Bearer {director_token}"}
 
     me_res = client.get("/api/auth/me", headers=headers_admin)
     assert me_res.status_code == 200
@@ -283,10 +301,23 @@ def test_authentication_and_authorization_flow(client, db_session):
     assert payslip_res.status_code == 403
     assert "chưa được phát hành" in payslip_res.json()["detail"]
 
-    # Admin publishes payslips
+    # Direct publishing is disabled: chief accountant confirms and requests,
+    # then a director (or IT admin) performs the final approval and publishing.
     pub_res = client.post("/api/salary/publish", json={"period": "2026-05", "is_published": True}, headers=headers_admin)
-    assert pub_res.status_code == 200
-    assert pub_res.json()["published_count"] == 1
+    assert pub_res.status_code == 409
+
+    confirm_res = client.post("/api/salary/approval/confirm", json={"period": "2026-05"}, headers=headers_admin)
+    assert confirm_res.status_code == 200
+    assert confirm_res.json()["status"] == "CONFIRMED"
+
+    request_res = client.post("/api/salary/approval/request", json={"period": "2026-05"}, headers=headers_admin)
+    assert request_res.status_code == 200
+    assert request_res.json()["status"] == "PENDING_APPROVAL"
+
+    approve_res = client.post("/api/salary/approval/approve", json={"period": "2026-05"}, headers=headers_director)
+    assert approve_res.status_code == 200
+    assert approve_res.json()["status"] == "APPROVED"
+    assert approve_res.json()["published_count"] == 1
 
     # The employee selector exposes only issued periods, avoiding requests for
     # arbitrary months that cannot have a payslip yet.

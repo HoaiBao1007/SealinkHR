@@ -58,19 +58,29 @@ class CommissionJob(Base):
     consignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sub_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     container_string: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    wt: Mapped[float | None] = mapped_column(Float, nullable=True)
-    vol: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wt: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
+    vol: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
     carrier_booking_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
     por: Mapped[str | None] = mapped_column(String(100), nullable=True)
     final_destination: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    realized_revenue: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    unrealized_revenue: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    realized_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    unrealized_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    profit_loss: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    realized_revenue: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
+    unrealized_revenue: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
+    realized_cost: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
+    unrealized_cost: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
+    profit_loss: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
     container_picked: Mapped[str | None] = mapped_column(String(10), nullable=True)
     payment_received: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # AGEING reconciliation snapshot.  These values belong to the receivable
+    # evidence, not the P&L revenue columns, and are kept so the UI can explain
+    # exactly how much the customer has paid for this JOB.
+    receivable_amount: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
+    balance_amount: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
+    payment_received_amount: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
     bonus_remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Manual accounting inputs. They are intentionally not derived from P&L or
+    # payment status so a later calculation flow can consume the reviewed values.
+    hold_bonus_percent: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
+    hold_bonus_amount: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
     # The accounting team can decide the payout method while this JOB is still
     # being held.  This is only a release plan; it never changes the bonus
     # formula or the ledger amount.
@@ -79,6 +89,81 @@ class CommissionJob(Base):
 
     # Relationship
     period: Mapped["CommissionPeriod"] = relationship("CommissionPeriod", back_populates="jobs")
+    receivable_attachments: Mapped[list["CommissionJobReceivableAttachment"]] = relationship(
+        "CommissionJobReceivableAttachment",
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )
+    receivable_links: Mapped[list["CommissionJobReceivableLink"]] = relationship(
+        "CommissionJobReceivableLink",
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )
+
+
+class CommissionJobReceivableAttachment(Base):
+    """Private receivable evidence stored once and linked to one or more JOBs."""
+
+    __tablename__ = "commission_job_receivable_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    period_id: Mapped[int] = mapped_column(
+        ForeignKey("commission_periods.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("commission_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_filename: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    content_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    job: Mapped["CommissionJob"] = relationship(
+        "CommissionJob", back_populates="receivable_attachments"
+    )
+    job_links: Mapped[list["CommissionJobReceivableLink"]] = relationship(
+        "CommissionJobReceivableLink",
+        back_populates="attachment",
+        cascade="all, delete-orphan",
+    )
+
+
+class CommissionJobReceivableLink(Base):
+    """Association between one stored receivable file and each selected JOB."""
+
+    __tablename__ = "commission_job_receivable_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    period_id: Mapped[int] = mapped_column(
+        ForeignKey("commission_periods.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("commission_jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attachment_id: Mapped[int] = mapped_column(
+        ForeignKey("commission_job_receivable_attachments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    job: Mapped["CommissionJob"] = relationship(
+        "CommissionJob", back_populates="receivable_links"
+    )
+    attachment: Mapped["CommissionJobReceivableAttachment"] = relationship(
+        "CommissionJobReceivableAttachment", back_populates="job_links"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "attachment_id", name="uq_commission_receivable_job_attachment"),
+    )
 
 
 class CommissionRepOverride(Base):
@@ -95,11 +180,11 @@ class CommissionRepOverride(Base):
     sales_rep: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
 
     override_job_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    override_profit_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
-    override_target: Mapped[float | None] = mapped_column(Float, nullable=True)
-    override_bonus_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
-    override_total_bonus: Mapped[float | None] = mapped_column(Float, nullable=True)
-    override_monthly_bonus: Mapped[float | None] = mapped_column(Float, nullable=True)
+    override_profit_loss: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
+    override_target: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
+    override_bonus_rate: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
+    override_total_bonus: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
+    override_monthly_bonus: Mapped[float | None] = mapped_column(Float(precision=53), nullable=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
@@ -158,7 +243,7 @@ class CommissionWalletLedger(Base):
     sales_rep: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     employee_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
     entry_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[float] = mapped_column(Float(precision=53), nullable=False)
     payout_period: Mapped[str | None] = mapped_column(String(7), nullable=True, index=True)
     payout_batch: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -176,7 +261,7 @@ class CommissionPayoutPolicy(Base):
     sales_rep: Mapped[str] = mapped_column(String(150), nullable=False, unique=True, index=True)
     employee_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
     payout_mode: Mapped[str] = mapped_column(String(24), nullable=False, default="MANUAL")
-    minimum_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    minimum_amount: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -189,8 +274,8 @@ class CommissionCalculationSnapshot(Base):
     period_id: Mapped[int] = mapped_column(ForeignKey("commission_periods.id", ondelete="CASCADE"), nullable=False, index=True)
     sales_rep: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     employee_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
-    monthly_bonus: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    total_bonus_quarter: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    monthly_bonus: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
+    total_bonus_quarter: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
     source_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -205,7 +290,7 @@ class CommissionBonusEntitlement(Base):
     job_id: Mapped[int | None] = mapped_column(ForeignKey("commission_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
     sales_rep: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     employee_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
-    calculated_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    calculated_amount: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
     source_period: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="ACTIVE", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -220,7 +305,7 @@ class CommissionPayoutSchedule(Base):
     employee_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
     payout_period: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="SCHEDULED", index=True)
-    total_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_amount: Mapped[float] = mapped_column(Float(precision=53), nullable=False, default=0.0)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_verification_id: Mapped[int | None] = mapped_column(
         ForeignKey("commission_payment_verifications.id", ondelete="SET NULL"), nullable=True, index=True
@@ -237,5 +322,5 @@ class CommissionPayoutScheduleAllocation(Base):
     schedule_id: Mapped[int] = mapped_column(ForeignKey("commission_payout_schedules.id", ondelete="CASCADE"), nullable=False, index=True)
     entitlement_id: Mapped[int | None] = mapped_column(ForeignKey("commission_bonus_entitlements.id", ondelete="SET NULL"), nullable=True, index=True)
     ledger_entry_id: Mapped[int | None] = mapped_column(ForeignKey("commission_wallet_ledger.id", ondelete="SET NULL"), nullable=True, index=True)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[float] = mapped_column(Float(precision=53), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="SCHEDULED", index=True)

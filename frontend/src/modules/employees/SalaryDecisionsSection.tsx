@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useConfirmDialog } from '../../shared/ui/ConfirmDialog'
 import { VndInput } from '../../shared/ui/VndInput'
+import { BrandedDateInput } from '../../shared/ui/BrandedDateInput'
 import { formatVnd } from '../../shared/utils/currency'
+import { AppIcon } from '../../shared/ui/AppIcon'
+import { credentialedFetch } from '../../shared/api/credentialedFetch'
 
 type SalaryDecision = {
   id: number
@@ -54,7 +57,7 @@ export function SalaryDecisionsSection({
   async function loadDecisions() {
     setLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/employees/${employeeId}/salary-decisions`, {
+      const res = await credentialedFetch(`${apiBase}/api/employees/${employeeId}/salary-decisions`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         credentials: 'include',
       })
@@ -81,7 +84,7 @@ export function SalaryDecisionsSection({
     if (!effectiveDate) return alert('Vui lòng chọn ngày hiệu lực')
     setLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/employees/${employeeId}/salary-decisions`, {
+      const res = await credentialedFetch(`${apiBase}/api/employees/${employeeId}/salary-decisions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -116,7 +119,7 @@ export function SalaryDecisionsSection({
     if (!await confirm({ title: 'Xóa quyết định lương', message: 'Bạn có chắc chắn muốn xóa quyết định lương này?', confirmLabel: 'Xóa', tone: 'danger' })) return
     setLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/salary-decisions/${id}`, {
+      const res = await credentialedFetch(`${apiBase}/api/salary-decisions/${id}`, {
         method: 'DELETE',
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         credentials: 'include',
@@ -135,12 +138,13 @@ export function SalaryDecisionsSection({
     FULLTIME: 'Chính thức',
     PROBATION: 'Thử việc',
     INTERN: 'Học việc',
+    TRAINEE: 'Thực tập',
   }[type || ''] || type || '—')
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 mt-6">
       <div className="flex justify-between items-center mb-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">💰 Lịch sử biến động lương</p>
+        <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"><AppIcon name="money" size={15} /> Lịch sử biến động lương</p>
         <button 
           onClick={() => setShowAdd(!showAdd)}
           className="text-xs font-semibold text-[#163B66] hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition cursor-pointer"
@@ -173,8 +177,7 @@ export function SalaryDecisionsSection({
             </div>
             <div>
               <span className="block text-xs font-semibold text-slate-700 mb-1">Ngày áp dụng</span>
-              <input 
-                type="date" 
+              <BrandedDateInput
                 required 
                 className="h-9 w-full rounded-xl border border-slate-300 px-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200" 
                 value={effectiveDate} 
@@ -257,16 +260,16 @@ export function SalaryDecisionsSection({
                     </>
                   )}
                   {d.status === 'ACTIVE' ? (
-                    <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full">HIỆU LỰC</span>
+                    <span className="bg-emerald-100 text-emerald-700 text-[11px] font-bold px-2 py-0.5 rounded-full">HIỆU LỰC</span>
                   ) : (
-                    <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">CHỜ (PENDING)</span>
+                    <span className="bg-amber-100 text-amber-700 text-[11px] font-bold px-2 py-0.5 rounded-full">CHỜ (PENDING)</span>
                   )}
                 </div>
                 <p className="text-xs text-slate-500">
                   <span className="font-semibold text-slate-600">Ngày áp dụng:</span> {new Date(d.effective_date).toLocaleDateString('vi-VN')}
                   {d.reason && <span className="ml-2 border-l border-slate-300 pl-2 text-slate-400">{d.reason}</span>}
                 </p>
-                <div className="mt-2 text-[10px] text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
+                <div className="mt-2 text-[11px] text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
                   <span><strong className="text-slate-600">Cơm:</strong> {formatCurrency(d.meal_allowance || 0)}</span>
                   <span><strong className="text-slate-600">Xăng xe:</strong> {formatCurrency(d.trans_allowance || 0)}</span>
                   <span><strong className="text-slate-600">Điện thoại:</strong> {formatCurrency(d.phone_allowance || 0)}</span>
@@ -277,7 +280,7 @@ export function SalaryDecisionsSection({
               </div>
               <button 
                 onClick={() => handleDelete(d.id)}
-                className="mt-2 sm:mt-0 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                className="app-delete-button mt-2 sm:mt-0 p-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition cursor-pointer"
                 title="Xóa"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

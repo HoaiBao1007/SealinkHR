@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_hr_manager_user, get_db
@@ -89,7 +90,10 @@ def get_organization_chart(db: Session = Depends(get_db)) -> OrganizationChartRe
     employees = (
         db.query(Employee)
         .options(joinedload(Employee.department))
-        .filter(Employee.is_active.is_(True))
+        .filter(
+            Employee.is_active.is_(True),
+            func.upper(Employee.status).notin_(("RESIGNED", "INACTIVE")),
+        )
         .order_by(Employee.id)
         .all()
     )

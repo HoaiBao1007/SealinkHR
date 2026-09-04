@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { BrandedDateInput } from '../../shared/ui/BrandedDateInput';
+import { AppIcon } from '../../shared/ui/AppIcon';
 
 interface Holiday {
   id: number;
@@ -161,7 +163,7 @@ export const HolidayConfigurator: React.FC<HolidayConfiguratorProps> = ({ apiReq
     <div className="bg-white rounded-lg shadow p-4 mb-4 font-roboto border-l-4 border-blue-500">
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-bold text-gray-800 flex items-center">
-          <span className="text-xl mr-2">📅</span> Thiết lập Ngày lễ / Nghỉ bù
+          <AppIcon name="calendar" size={19} className="mr-2" /> Thiết lập Ngày lễ / Nghỉ bù
         </h3>
         <div className="flex items-center gap-3 holiday-toolbar-actions">
           <select 
@@ -204,8 +206,7 @@ export const HolidayConfigurator: React.FC<HolidayConfiguratorProps> = ({ apiReq
           </div>
           <div className="flex flex-col">
             <label className="block text-sm font-medium text-gray-700 mb-1">Từ ngày</label>
-            <input
-              type="date"
+            <BrandedDateInput
               required
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
@@ -214,8 +215,7 @@ export const HolidayConfigurator: React.FC<HolidayConfiguratorProps> = ({ apiReq
           </div>
           <div className="flex flex-col">
             <label className="block text-sm font-medium text-gray-700 mb-1">Đến ngày</label>
-            <input
-              type="date"
+            <BrandedDateInput
               required
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
@@ -261,7 +261,7 @@ export const HolidayConfigurator: React.FC<HolidayConfiguratorProps> = ({ apiReq
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {editRowId === h.id ? (
-                        <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 w-full" />
+                        <BrandedDateInput value={editDate} onChange={e => setEditDate(e.target.value)} />
                       ) : (
                         h.holiday_date
                       )}
@@ -280,7 +280,7 @@ export const HolidayConfigurator: React.FC<HolidayConfiguratorProps> = ({ apiReq
                       ) : (
                         <div className="flex justify-end gap-2">
                           <button onClick={() => handleEditClick(h)} className="text-indigo-600 hover:text-indigo-900 font-bold">Sửa</button>
-                          <button onClick={() => handleDelete(h.id)} className="text-red-600 hover:text-red-900 font-bold">Xóa</button>
+                          <button onClick={() => handleDelete(h.id)} className="app-delete-button text-red-600 hover:text-red-900 font-bold">Xóa</button>
                         </div>
                       )}
                     </td>

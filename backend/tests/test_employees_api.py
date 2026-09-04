@@ -1,3 +1,6 @@
+from app.models.monthly_salary_input import MonthlySalaryInput
+
+
 def test_create_list_update_employee(client):
     create_payload = {
         "machine_employee_id": "E100",
@@ -47,6 +50,51 @@ def test_create_list_update_employee(client):
     assert updated["company_phone_number"] == "02873075769"
 
 
+def test_employee_contract_type_and_date_range_are_persisted_and_validated(client):
+    created = client.post(
+        "/api/employees",
+        json={
+            "machine_employee_id": "CONTRACT-E101",
+            "full_name": "Nhan Vien Hop Dong",
+            "contract_type": "FIXED_TERM_1",
+            "contract_sign_date": "2026-08-15",
+            "contract_start_date": "2026-09-01",
+            "contract_end_date": "2027-08-31",
+        },
+    )
+
+    assert created.status_code == 200
+    employee = created.json()
+    assert employee["contract_type"] == "FIXED_TERM_1"
+    assert employee["contract_sign_date"] == "2026-08-15"
+    assert employee["contract_start_date"] == "2026-09-01"
+    assert employee["contract_end_date"] == "2027-08-31"
+
+    invalid_missing_end = client.post(
+        "/api/employees",
+        json={
+            "machine_employee_id": "CONTRACT-E102",
+            "full_name": "Thieu Ngay Ket Thuc",
+            "contract_type": "FIXED_TERM_2",
+            "contract_start_date": "2027-09-01",
+        },
+    )
+    assert invalid_missing_end.status_code == 422
+
+    changed = client.put(
+        f"/api/employees/{employee['id']}",
+        json={
+            "contract_type": "INDEFINITE",
+            "contract_sign_date": "2027-08-15",
+            "contract_start_date": "2027-09-01",
+        },
+    )
+    assert changed.status_code == 200
+    assert changed.json()["contract_type"] == "INDEFINITE"
+    assert changed.json()["contract_start_date"] is None
+    assert changed.json()["contract_end_date"] is None
+
+
 def test_create_employee_duplicate_machine_id(client):
     payload = {
         "machine_employee_id": "E200",
@@ -57,45 +105,61 @@ def test_create_employee_duplicate_machine_id(client):
 
     assert first.status_code == 200
     assert second.status_code == 409
-    assert second.json()["detail"] == (
-        "Mã máy chấm công (ID) đã được dùng làm mã chính hoặc mã phụ của nhân viên khác."
-    )
+    assert "ID máy chấm công 'E200'" in second.json()["detail"]
+    assert "đang thuộc hồ sơ" in second.json()["detail"]
+    assert "Le Van C" in second.json()["detail"]
 
 
-def test_employee_identifiers_cannot_cross_duplicate_primary_and_alternate_ids(client):
-    first = client.post(
+def test_machine_identifier_is_searchable_and_conflict_identifies_owner(client):
+    owner = client.post(
         "/api/employees",
         json={
-            "machine_employee_id": "PRIMARY-E203",
-            "biometric_id": "ALIAS-E203",
-            "full_name": "Nhan Vien Co Ma Phu",
+            "machine_employee_id": "42",
+            "full_name": "Nhan Vien Dang Giu Ma May",
+            "employee_code": "SL022",
         },
     )
-    assert first.status_code == 200
+    assert owner.status_code == 200
 
-    duplicate_primary = client.post(
+    search = client.get("/api/employees", params={"q": "42"})
+    assert search.status_code == 200
+    assert [row["id"] for row in search.json()] == [owner.json()["id"]]
+
+    conflict = client.post(
+        "/api/employees",
+        json={"machine_employee_id": "42", "full_name": "Nhan Vien Moi"},
+    )
+    assert conflict.status_code == 409
+    detail = conflict.json()["detail"]
+    assert "Nhan Vien Dang Giu Ma May" in detail
+    assert "mã máy chính: 42" in detail
+    assert "mã nhân viên: SL022" in detail
+
+
+def test_shared_it_admin_audit_profile_is_hidden_from_employee_directories(client):
+    created = client.post(
         "/api/employees",
         json={
-            "machine_employee_id": "ALIAS-E203",
-            "full_name": "Nhan Vien Trung Ma Phu",
+            "machine_employee_id": "ADMIN_SEALINK",
+            "full_name": "SEALINK Administrator",
+            "username": "admin_sealink",
+            "password": "StrongPassword123!",
+            "is_active": False,
         },
     )
-    assert duplicate_primary.status_code == 409
+    assert created.status_code == 200
+    employee_id = created.json()["id"]
 
-    second = client.post(
-        "/api/employees",
-        json={
-            "machine_employee_id": "PRIMARY-E204",
-            "full_name": "Nhan Vien Thu Hai",
-        },
-    )
-    assert second.status_code == 200
+    standard_directory = client.get("/api/employees")
+    assert standard_directory.status_code == 200
+    assert employee_id not in {row["id"] for row in standard_directory.json()}
 
-    duplicate_alternate = client.put(
-        f"/api/employees/{second.json()['id']}",
-        json={"biometric_id": "PRIMARY-E203"},
-    )
-    assert duplicate_alternate.status_code == 409
+    hr_directory = client.get("/api/hr/employees")
+    assert hr_directory.status_code == 200
+    assert employee_id not in {row["id"] for row in hr_directory.json()}
+
+    # The technical profile is retained for audit links and direct lookups.
+    assert client.get(f"/api/employees/{employee_id}").status_code == 200
 
 
 def test_create_employee_allows_blank_login_credentials(client):
@@ -123,7 +187,6 @@ def test_employee_detail_can_fill_deferred_profile_fields(client):
     updated = client.put(f"/api/employees/{employee_id}", json={
         "full_name": "NGUYEN VAN BO SUNG",
         "notion_name": "NOTION NAME",
-        "biometric_id": "BIO-E202",
         "position": "Nhân viên",
         "start_date": "2026-07-22",
         "contract_salary": 15000000,
@@ -144,13 +207,67 @@ def test_employee_detail_can_fill_deferred_profile_fields(client):
     data = updated.json()
     assert data["full_name"] == "NGUYEN VAN BO SUNG"
     assert data["notion_name"] == "NOTION NAME"
-    assert data["biometric_id"] == "BIO-E202"
     assert data["contract_salary"] == 15000000
     assert data["meal_allowance"] == 1300000
     assert data["account_number"] == "123456789"
     assert data["phone_number"] == "0902000202"
     assert data["company_phone_number"] == "02873075768"
     assert data["username"] == "mapping_e202"
+
+
+def test_employee_detail_allowances_sync_to_all_payroll_periods_including_published(client, db_session):
+    created = client.post("/api/employees", json={
+        "machine_employee_id": "E202-ALLOWANCE-SYNC",
+        "full_name": "Nhan Vien Dong Bo Phu Cap",
+        "employee_type": "FULLTIME",
+    })
+    assert created.status_code == 200
+    employee_id = created.json()["id"]
+
+    for period in ("2026-07", "2026-08"):
+        materialized = client.post(
+            "/api/salary/inputs",
+            json={"employee_id": employee_id, "salary_period": period},
+        )
+        assert materialized.status_code == 200
+
+    published = db_session.query(MonthlySalaryInput).filter(
+        MonthlySalaryInput.employee_id == employee_id,
+        MonthlySalaryInput.salary_period == "2026-07",
+    ).one()
+    published.meal_allowance_free = 1_200_000
+    published.phone_allowance_free = 2_000_000
+    published.trans_allowance_tax = 2_000_000
+    published.perf_allowance_tax = 0
+    published.is_published = True
+    db_session.commit()
+
+    updated = client.put(f"/api/employees/{employee_id}", json={
+        "meal_allowance": 1_350_000,
+        "phone_allowance": 850_000,
+        "trans_allowance": 650_000,
+        "other_allowance": 450_000,
+    })
+    assert updated.status_code == 200
+
+    rows = client.get("/api/salary/inputs", params={"period": "2026-08"})
+    assert rows.status_code == 200
+    august = next(row for row in rows.json() if row["employee_id"] == employee_id)
+    assert august["meal_allowance_free"] == 1_350_000
+    assert august["phone_allowance_free"] == 850_000
+    assert august["trans_allowance_tax"] == 650_000
+    assert august["perf_allowance_tax"] == 450_000
+
+    db_session.expire_all()
+    july = db_session.query(MonthlySalaryInput).filter(
+        MonthlySalaryInput.employee_id == employee_id,
+        MonthlySalaryInput.salary_period == "2026-07",
+    ).one()
+    assert july.is_published is True
+    assert july.meal_allowance_free == 1_350_000
+    assert july.phone_allowance_free == 850_000
+    assert july.trans_allowance_tax == 650_000
+    assert july.perf_allowance_tax == 450_000
 
 
 def test_create_employee_saves_contract_allowance_configuration(client):
@@ -184,6 +301,18 @@ def test_create_employee_saves_contract_allowance_configuration(client):
 
 
 def test_employee_type_controls_default_allowances(client):
+    trainee_response = client.post("/api/employees", json={
+        "machine_employee_id": "E205-TRAINEE",
+        "full_name": "Nhan Vien Thuc Tap",
+        "employee_type": "TRAINEE",
+    })
+    assert trainee_response.status_code == 200
+    trainee = trainee_response.json()
+    assert trainee["employee_type"] == "TRAINEE"
+    assert trainee["meal_allowance"] == 0
+    assert trainee["phone_allowance"] == 0
+    assert trainee["trans_allowance"] == 0
+
     created = client.post("/api/employees", json={
         "machine_employee_id": "E206",
         "full_name": "Nhan Vien Hoc Viec",

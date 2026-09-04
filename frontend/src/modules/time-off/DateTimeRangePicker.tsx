@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { BrandedDateInput } from '../../shared/ui/BrandedDateInput'
+import { AppIcon } from '../../shared/ui/AppIcon'
 import './date-time-range-picker.css'
 
 type Props = {
@@ -162,11 +164,11 @@ export function DateTimeRangePicker({ startAt, endAt, onChange, disabled = false
         </span>
         <span className="date-time-range-summary">
           <strong>{formatValue(startAt)}</strong>
-          <span aria-hidden="true">→</span>
+          <AppIcon name="arrow-right" size={14} />
           <strong>{formatValue(endAt)}</strong>
         </span>
         <small>{duration}</small>
-        <span className="date-time-range-chevron" aria-hidden="true">⌄</span>
+        <span className="date-time-range-chevron"><AppIcon name="chevron-down" size={15} /></span>
       </button>
 
       {open && (
@@ -176,14 +178,13 @@ export function DateTimeRangePicker({ startAt, endAt, onChange, disabled = false
               <strong>Khoảng thời gian nghỉ</strong>
               <span>{duration}</span>
             </div>
-            <button type="button" className="app-close-button app-close-button--compact" onClick={() => setOpen(false)} aria-label="Đóng">×</button>
+            <button type="button" className="app-close-button app-close-button--compact" onClick={() => setOpen(false)} aria-label="Đóng"><AppIcon name="close" size={14} /></button>
           </div>
 
           <div className="date-time-range-row" role="group" aria-label="Thời gian bắt đầu">
             <span>Bắt đầu</span>
             <div className="date-time-range-controls">
-              <input
-                type="date"
+              <BrandedDateInput
                 value={startParts.date}
                 onChange={(event) => updateStartPart('date', event.target.value)}
                 aria-label="Ngày bắt đầu"
@@ -204,8 +205,7 @@ export function DateTimeRangePicker({ startAt, endAt, onChange, disabled = false
           <div className="date-time-range-row" role="group" aria-label="Thời gian kết thúc">
             <span>Kết thúc</span>
             <div className="date-time-range-controls">
-              <input
-                type="date"
+              <BrandedDateInput
                 value={endParts.date}
                 min={startParts.date}
                 onChange={(event) => updateEndPart('date', event.target.value)}

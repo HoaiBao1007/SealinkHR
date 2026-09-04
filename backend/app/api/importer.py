@@ -96,7 +96,6 @@ def _build_employee_report_directory(db: Session) -> dict[str, dict[str, str | N
     rows = (
         db.query(
             Employee.machine_employee_id,
-            Employee.biometric_id,
             Employee.full_name,
             Employee.department_name,
             Employee.notion_name,
@@ -106,7 +105,7 @@ def _build_employee_report_directory(db: Session) -> dict[str, dict[str, str | N
     )
 
     directory: dict[str, dict[str, str | None]] = {}
-    for machine_employee_id, biometric_id, full_name, department_name, notion_name in rows:
+    for machine_employee_id, full_name, department_name, notion_name in rows:
         normalized_machine_id = clean_machine_id(machine_employee_id)
         if not normalized_machine_id:
             continue
@@ -118,9 +117,6 @@ def _build_employee_report_directory(db: Session) -> dict[str, dict[str, str | N
             "department_name": str(department_name or "").strip() or None,
         }
         directory[normalized_machine_id] = profile
-        normalized_biometric_id = clean_machine_id(biometric_id)
-        if normalized_biometric_id:
-            directory[normalized_biometric_id] = profile
 
     return directory
 

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { DateTimeRangePicker, defaultTimeOffRange, snapDateTimeToHalfHour } from './DateTimeRangePicker'
 import { BUSINESS_TRAVEL_REQUEST, LEAVE_REQUEST, TimeOffRequestIntent, type LeaveBalance } from './TimeOffRequestIntent'
 import { TimeOffAttachmentUpload, type TimeOffAttachment } from './TimeOffAttachmentUpload'
+import { AppIcon } from '../../shared/ui/AppIcon'
 import './time-off-management.css'
 
 type ApiRequest = (path: string, init?: RequestInit) => Promise<Response>
@@ -121,6 +122,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 const ACTION_LABELS: Record<string, string> = {
   SUBMIT: 'Đã gửi yêu cầu',
+  EDIT: 'Đã chỉnh sửa yêu cầu',
   RESUBMIT: 'Đã bổ sung và gửi lại',
   APPROVE: 'Đã phê duyệt',
   REJECT: 'Đã từ chối',
@@ -358,7 +360,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       }))
-      setNotice(editingRequestId ? 'Đã bổ sung và gửi lại yêu cầu cho Manager.' : 'Đã gửi yêu cầu nghỉ cho Manager.')
+      setNotice(editingRequestId ? 'Đã lưu thay đổi và gửi lại yêu cầu cho Manager.' : 'Đã gửi yêu cầu nghỉ cho Manager.')
       setForm(emptyForm(bootstrap?.manager?.user_id))
       setAttachments([])
       setEditingRequestId(null)
@@ -487,7 +489,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
 
   const viewTabs: Array<{ key: ViewKey; label: string; count?: number }> = [
     { key: 'calendar', label: 'Time Off Calendar' },
-    { key: 'new', label: editingRequestId ? 'Bổ sung đơn' : 'Request Form' },
+    { key: 'new', label: editingRequestId ? 'Chỉnh sửa đơn' : 'Request Form' },
     { key: 'mine', label: 'My Requests', count: myRequests.length },
     { key: 'pending', label: 'Pending My Approval', count: pendingRequests.length },
   ]
@@ -501,7 +503,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
           <p>Gửi đơn nghỉ, làm việc tại nhà hoặc công tác; phê duyệt theo cơ cấu phòng ban trong một workspace thống nhất.</p>
         </div>
         <button type="button" className="time-off-primary" onClick={() => { setEditingRequestId(null); setForm(emptyForm(bootstrap?.manager?.user_id)); setView('new') }} disabled={!bootstrap?.can_submit}>
-          <span>＋</span> Tạo yêu cầu
+          <AppIcon name="plus" size={16} /> Tạo yêu cầu
         </button>
       </header>
 
@@ -514,8 +516,8 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
         ))}
       </nav>
 
-      {error && <div className="time-off-alert is-error"><span>!</span>{error}<button type="button" className="app-close-button app-close-button--compact" onClick={() => setError(null)} aria-label="Đóng thông báo lỗi">×</button></div>}
-      {notice && <div className="time-off-alert is-success"><span>✓</span>{notice}<button type="button" className="app-close-button app-close-button--compact" onClick={() => setNotice(null)} aria-label="Đóng thông báo">×</button></div>}
+      {error && <div className="time-off-alert is-error"><AppIcon name="warning" size={16} />{error}<button type="button" className="app-close-button app-close-button--compact" onClick={() => setError(null)} aria-label="Đóng thông báo lỗi"><AppIcon name="close" size={14} /></button></div>}
+      {notice && <div className="time-off-alert is-success"><AppIcon name="check" size={16} />{notice}<button type="button" className="app-close-button app-close-button--compact" onClick={() => setNotice(null)} aria-label="Đóng thông báo"><AppIcon name="close" size={14} /></button></div>}
 
       {loading ? (
         <div className="time-off-loading"><span /><p>Đang tải Time Off workspace…</p></div>
@@ -613,7 +615,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
         <div className="time-off-form-layout">
           <form className="time-off-request-form" onSubmit={submitRequest}>
             <div className="time-off-section-heading">
-              <div><span>01</span><h3>{editingRequestId ? 'Bổ sung thông tin yêu cầu' : 'Thông tin người gửi'}</h3></div>
+              <div><span>01</span><h3>{editingRequestId ? 'Chỉnh sửa yêu cầu' : 'Thông tin người gửi'}</h3></div>
               <p>Nhân viên và phòng ban lấy từ tài khoản đăng nhập; Manager mặc định có thể đổi trong danh sách hợp lệ.</p>
             </div>
             <div className="time-off-identity-grid">
@@ -674,13 +676,13 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
             </div>
             {bootstrap && !bootstrap.can_submit && <div className="time-off-config-warning">Hồ sơ chưa có phòng ban/Manager có tài khoản. Admin cần hoàn tất cấu hình Department & Manager trước khi gửi.</div>}
             <div className="time-off-form-actions">
-              {editingRequestId && <button type="button" className="time-off-secondary" onClick={() => { setEditingRequestId(null); setForm(emptyForm(bootstrap?.manager?.user_id)) }}>Hủy bổ sung</button>}
-              <button type="submit" className="time-off-primary" disabled={saving || !bootstrap?.can_submit || (form.request_type === BUSINESS_TRAVEL_REQUEST && (!form.business_travel_policy_acknowledged || attachments.length === 0))}>{saving ? 'Đang gửi…' : editingRequestId ? 'Gửi lại cho Manager' : 'Gửi yêu cầu'}</button>
+              {editingRequestId && <button type="button" className="time-off-secondary" onClick={() => { setEditingRequestId(null); setForm(emptyForm(bootstrap?.manager?.user_id)) }}>Hủy chỉnh sửa</button>}
+              <button type="submit" className="time-off-primary" disabled={saving || !bootstrap?.can_submit || (form.request_type === BUSINESS_TRAVEL_REQUEST && (!form.business_travel_policy_acknowledged || attachments.length === 0))}>{saving ? 'Đang gửi…' : editingRequestId ? 'Lưu và gửi lại Manager' : 'Gửi yêu cầu'}</button>
             </div>
           </form>
           <section className="time-off-form-aside" aria-labelledby="time-off-approval-workflow-title">
             <div className="time-off-form-aside-heading">
-              <div className="time-off-aside-icon" aria-hidden="true">↗</div>
+              <div className="time-off-aside-icon" aria-hidden="true"><AppIcon name="arrow-right" size={19} /></div>
               <div>
                 <p>QUY TRÌNH</p>
                 <h3 id="time-off-approval-workflow-title">Luồng phê duyệt</h3>
@@ -691,8 +693,8 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
               <li><span>2</span><div><strong>Manager review</strong><p>Đơn vào đúng “Pending My Approval” và tạo thông báo.</p></div></li>
               <li><span>3</span><div><strong>In-app result</strong><p>Kết quả được gửi vào tài khoản nhân viên trên website.</p></div></li>
             </ol>
-            {userRole === 'HR_ADMIN' || userRole === 'ADMIN' || userRole === 'IT_ADMIN' ? (
-              <button className="time-off-aside-link" type="button" onClick={() => onNavigate?.(userRole === 'HR_ADMIN' ? '/hr/departments' : '/admin/departments')}>Mở cấu hình Department & Manager <span aria-hidden="true">→</span></button>
+            {userRole === 'HR_ADMIN' || userRole === 'ADMIN' || userRole === 'DIRECTOR' || userRole === 'IT_ADMIN' ? (
+              <button className="time-off-aside-link" type="button" onClick={() => onNavigate?.(userRole === 'HR_ADMIN' ? '/hr/departments' : '/admin/departments')}>Mở cấu hình Department &amp; Manager <AppIcon name="arrow-right" size={15} /></button>
             ) : null}
           </section>
         </div>
@@ -700,7 +702,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
         <div className="time-off-list-card">
           <div className="time-off-list-heading">
             <div><h3>{view === 'mine' ? 'My Requests' : 'Pending My Approval'}</h3><p>{view === 'mine' ? 'Toàn bộ yêu cầu nghỉ của bạn và trạng thái hiện tại.' : 'Chỉ các đơn được backend gán trực tiếp cho tài khoản của bạn.'}</p></div>
-            {view === 'mine' && <button type="button" className="time-off-primary" onClick={() => setView('new')}>＋ Tạo yêu cầu</button>}
+            {view === 'mine' && <button type="button" className="time-off-primary" onClick={() => setView('new')}><AppIcon name="plus" size={16} /> Tạo yêu cầu</button>}
           </div>
           <div className="time-off-request-list">
             {(view === 'mine' ? myRequests : pendingRequests).map((request) => (
@@ -713,7 +715,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
               </button>
             ))}
             {(view === 'mine' ? myRequests : pendingRequests).length === 0 && (
-              <div className="time-off-empty-state"><div>✓</div><h4>{view === 'mine' ? 'Bạn chưa có yêu cầu nghỉ' : 'Không có đơn chờ duyệt'}</h4><p>{view === 'mine' ? 'Tạo yêu cầu mới để bắt đầu quy trình.' : 'Các yêu cầu mới sẽ xuất hiện tại đây.'}</p></div>
+              <div className="time-off-empty-state"><div><AppIcon name="check" size={22} /></div><h4>{view === 'mine' ? 'Bạn chưa có yêu cầu nghỉ' : 'Không có đơn chờ duyệt'}</h4><p>{view === 'mine' ? 'Tạo yêu cầu mới để bắt đầu quy trình.' : 'Các yêu cầu mới sẽ xuất hiện tại đây.'}</p></div>
             )}
           </div>
         </div>
@@ -724,7 +726,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
           <section className="time-off-day-events-modal" role="dialog" aria-modal="true" aria-label="Danh sách nhân viên nghỉ trong ngày" onMouseDown={(event) => event.stopPropagation()}>
             <header>
               <div><span>TIME OFF CALENDAR</span><h3>Ngày {formatCalendarDay(selectedCalendarDay.date)}</h3><p>{selectedCalendarDay.items.length} đơn nghỉ trong ngày này.</p></div>
-              <button type="button" className="app-close-button" onClick={() => setSelectedCalendarDay(null)} aria-label="Đóng">×</button>
+              <button type="button" className="app-close-button" onClick={() => setSelectedCalendarDay(null)} aria-label="Đóng"><AppIcon name="close" size={17} /></button>
             </header>
             <div className="time-off-day-events-list">
               {selectedCalendarDay.items.map((item) => (
@@ -746,7 +748,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
           <section className="time-off-detail-modal" role="dialog" aria-label="Time Off request detail" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <header>
               <div><span>TIME OFF REQUEST · #{selectedRequest.id}</span><h3>{selectedRequest.employee.full_name}</h3><p>{selectedRequest.department.name || 'Chưa có phòng ban'} · {selectedRequest.employee.employee_code || '—'}</p></div>
-              <button type="button" className="app-close-button" onClick={() => setSelectedRequest(null)} aria-label="Đóng">×</button>
+              <button type="button" className="app-close-button" onClick={() => setSelectedRequest(null)} aria-label="Đóng"><AppIcon name="close" size={17} /></button>
             </header>
             <div className="time-off-detail-body">
               <div className="time-off-detail-status-row">
@@ -777,7 +779,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
                 <section className="time-off-detail-attachments">
                   <span>File đính kèm</span>
                   {selectedRequest.attachments.map((attachment) => (
-                    <button key={attachment.id} type="button" onClick={() => void downloadAttachment(attachment)}>▧ {attachment.file_name}</button>
+                    <button key={attachment.id} type="button" className="app-download-button" onClick={() => void downloadAttachment(attachment)}>▧ {attachment.file_name}</button>
                   ))}
                 </section>
               )}
@@ -789,7 +791,7 @@ export function TimeOffManagement({ apiRequest, userRole, focusRequestId, focusK
               )}
             </div>
             <footer>
-              {selectedRequest.can_edit && <button type="button" className="time-off-primary" onClick={() => editRequest(selectedRequest)}>Bổ sung thông tin</button>}
+              {selectedRequest.can_edit && <button type="button" className="time-off-primary" onClick={() => editRequest(selectedRequest)}>{selectedRequest.status === 'PENDING_MANAGER' ? 'Chỉnh sửa yêu cầu' : 'Bổ sung thông tin'}</button>}
               {selectedRequest.can_edit_schedule && !scheduleDraft && <button type="button" className="time-off-secondary" disabled={saving} onClick={() => beginScheduleEdit(selectedRequest)}>Chỉnh thời gian nghỉ</button>}
               {selectedRequest.can_act && !actionMode && !scheduleDraft && <>
                 <button type="button" className="time-off-approve" disabled={saving} onClick={() => void applyAction('APPROVE')}>Approve</button>

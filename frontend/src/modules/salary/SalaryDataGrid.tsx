@@ -1,6 +1,7 @@
 /**
  * SalaryDataGrid — Bảng lương tổng hợp dành riêng ADMIN (Kế toán trưởng)
- * Đặc tả: FULLTIME (Khối A) + PROBATION (Khối B) + Sub-total + Grand Total
+ * Đặc tả: FULLTIME (Khối A) + PROBATION/INTERN (Khối B)
+ *          + TRAINEE (Khối C, chỉ đối soát — không tính lương)
  * Màu sắc: Ô nhập tay = #fff2cc (vàng kem) | Ô công thức = #f5f5f5 (xám khói)
  *
  * v2 — Bổ sung:
@@ -13,6 +14,7 @@ import { cake_salary } from '../../shared/utils/salary'
 import type { SalaryPolicy } from '../../shared/utils/salary'
 import { VndInput } from '../../shared/ui/VndInput'
 import { formatVnd } from '../../shared/utils/currency'
+import { AppIcon } from '../../shared/ui/AppIcon'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -23,7 +25,7 @@ interface SalaryEmployee {
   machine_employee_id?: string
   fullname: string
   position?: string
-  employee_type: 'FULLTIME' | 'PROBATION' | 'INTERN'
+  employee_type: 'FULLTIME' | 'PROBATION' | 'INTERN' | 'TRAINEE'
   contract_salary: number
   dependents_count: number
   account_number?: string
@@ -81,6 +83,7 @@ interface SalaryDataGridProps {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 const fmt = (n: number) => formatVnd(n)
+const SHOW_LEGACY_COMBINED_MATRIX = false
 
 const formatDateStr = (dateStr?: string) => {
   if (!dateStr) return '?'
@@ -175,6 +178,9 @@ const CL = {
   // Sub-total / Grand-total cell
   subtd: 'px-2 py-2 text-right text-[13px] font-bold',
 }
+
+const BLOCK_PAGE_SIZE_OPTIONS = [5, 10, 15] as const
+const DEFAULT_BLOCK_PAGE_SIZE = 10
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-row calculation helper
@@ -292,6 +298,12 @@ function emptySubTotal(): SubTotalData {
 // COLUMN HEADERS — defined once, rendered twice (FULLTIME + PROBATION)
 // Thêm cột checkbox (key='__check__') vào đầu
 // ─────────────────────────────────────────────────────────────────────────────
+const SALARY_NEUTRAL_SURFACE = '#f1f5f9'
+const SALARY_NEUTRAL_SURFACE_STRONG = '#e5e7eb'
+const SALARY_NEUTRAL_BORDER = '#cbd5e1'
+const SALARY_NEUTRAL_TEXT = '#111827'
+const SALARY_NEUTRAL_TEXT_MUTED = '#475569'
+
 const COL_GROUPS = [
   {
     label: '',
@@ -299,7 +311,7 @@ const COL_GROUPS = [
       { key: '__check__',        label: '',                        w: 28 },
       { key: 'stt',              label: 'STT',                     w: 32 },
     ],
-    bg: '#163b66', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   },
   {
     label: 'Thông tin NV & Ngày công',
@@ -307,7 +319,7 @@ const COL_GROUPS = [
       { key: 'actual_working_days',  label: 'Ngày công',           w: 70,  editable: true },
       { key: 'fullname',         label: 'Họ và tên',               w: 160, sticky: true },
     ],
-    bg: '#163b66', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
     sticky: true,
   },
   {
@@ -316,7 +328,7 @@ const COL_GROUPS = [
       { key: 'dependents_count', label: 'NPT',                     w: 44 },
       { key: 'position',         label: 'Vị trí',                  w: 100 },
     ],
-    bg: '#163b66', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   },
   {
     label: 'Lương thực tế',
@@ -324,7 +336,7 @@ const COL_GROUPS = [
       { key: 'contract_salary',      label: 'L.HĐLĐ',             w: 120, formula: true },
       { key: 'actual_salary',        label: 'L.Thực tế',           w: 120, formula: true },
     ],
-    bg: '#1e40af', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   },
   {
     label: 'Biến động & Phụ cấp',
@@ -339,7 +351,7 @@ const COL_GROUPS = [
       { key: 'sales_bonus',          label: 'Thưởng doanh số',    w: 125, formula: true },
       { key: 'bonus_14',             label: 'Lương T14',          w: 96,  editable: true },
     ],
-    bg: '#1d4ed8', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   },
   {
     label: 'Bảo hiểm NLĐ',
@@ -350,7 +362,7 @@ const COL_GROUPS = [
       { key: 'unemp_emp',     label: 'BHTN 1%',  w: 80, formula: true },
       { key: 'total_ins_emp', label: 'Tổng bảo hiểm NLĐ',  w: 110, formula: true },
     ],
-    bg: '#7c3aed', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   },
   {
     label: 'Chi phí DN chịu',
@@ -361,7 +373,7 @@ const COL_GROUPS = [
       { key: 'total_ins_comp', label: 'Tổng BH DN',   w: 95, formula: true },
       { key: 'union_fund_comp',label: 'KP CĐ 2%',    w: 80, formula: true },
     ],
-    bg: '#0369a1', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   },
   {
     label: 'Thuế TNCN',
@@ -370,7 +382,7 @@ const COL_GROUPS = [
       { key: 'assessable_income',label: 'TN tính thuế', w: 100, formula: true },
       { key: 'pit_tax',          label: 'Thuế PIT',   w: 90,  formula: true },
     ],
-    bg: '#b91c1c', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   },
   {
     label: 'Thanh toán',
@@ -383,7 +395,7 @@ const COL_GROUPS = [
       { key: 'advance_payment', label: 'Tạm ứng',       w: 90,  editable: true },
       { key: 'final_transfer',  label: 'Còn lại',  w: 125, formula: true },
     ],
-    bg: '#065f46', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   },
   {
     label: 'Đối soát Bank',
@@ -395,7 +407,7 @@ const COL_GROUPS = [
       { key: 'transfer_notes',  label: 'Ghi chú',       w: 130, formula: true },
       { key: 'other_income_evidence', label: 'Chứng từ TN khác', w: 112, formula: true },
     ],
-    bg: '#334155', color: '#fff',
+    bg: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT,
   }
 ]
 
@@ -427,14 +439,14 @@ const stickyStyles = (key: string, bg: string, isHeader = false) => {
 // ─────────────────────────────────────────────────────────────────────────────
 function SubTotalRow({ label, data }: { label: string; data: SubTotalData }) {
   const cellStyle = {
-    background: '#d9e1f2',
-    color: '#1f4e78',
+    background: SALARY_NEUTRAL_SURFACE,
+    color: SALARY_NEUTRAL_TEXT,
     fontWeight: 700,
     fontSize: 11,
     padding: '5px 6px',
     textAlign: 'right' as const,
     whiteSpace: 'nowrap' as const,
-    borderTop: '2px solid #1f4e78',
+    borderTop: `2px solid ${SALARY_NEUTRAL_BORDER}`,
   }
 
   // Map col key to value
@@ -541,19 +553,46 @@ export function SalaryDataGrid({
   // ── State: danh sách nhân viên được tick (bulk-edit) ────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [highlightEmployeeId, setHighlightEmployeeId] = useState<number | null>(null)
+  const [blockPages, setBlockPages] = useState<Record<'A' | 'B' | 'C', number>>({ A: 1, B: 1, C: 1 })
+  const [blockPageSizes, setBlockPageSizes] = useState<Record<'A' | 'B' | 'C', number>>({
+    A: DEFAULT_BLOCK_PAGE_SIZE,
+    B: DEFAULT_BLOCK_PAGE_SIZE,
+    C: DEFAULT_BLOCK_PAGE_SIZE,
+  })
 
   useEffect(() => {
-    if (!focusEmployeeId || !employees.some((employee) => employee.id === focusEmployeeId)) return
+    if (!focusEmployeeId) return
+    const focusedEmployee = employees.find((employee) => employee.id === focusEmployeeId)
+    if (!focusedEmployee) return
+    const block: 'A' | 'B' | 'C' = focusedEmployee.employee_type === 'FULLTIME'
+      ? 'A'
+      : focusedEmployee.employee_type === 'TRAINEE' ? 'C' : 'B'
+    const blockEmployees = employees.filter((employee) => {
+      if (block === 'A') return employee.employee_type === 'FULLTIME'
+      if (block === 'C') return employee.employee_type === 'TRAINEE'
+      return employee.employee_type === 'PROBATION' || employee.employee_type === 'INTERN'
+    })
+    const focusedIndex = blockEmployees.findIndex((employee) => employee.id === focusEmployeeId)
+    if (focusedIndex >= 0) {
+      const targetPage = Math.floor(focusedIndex / blockPageSizes[block]) + 1
+      setBlockPages((previous) => previous[block] === targetPage
+        ? previous
+        : { ...previous, [block]: targetPage })
+    }
     setHighlightEmployeeId(focusEmployeeId)
     const scrollTimer = window.setTimeout(() => {
       document.getElementById(`salary-employee-${focusEmployeeId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 180)
+    }, 250)
     const highlightTimer = window.setTimeout(() => setHighlightEmployeeId(null), 6000)
     return () => {
       window.clearTimeout(scrollTimer)
       window.clearTimeout(highlightTimer)
     }
-  }, [focusEmployeeId, focusKey, employees])
+  }, [focusEmployeeId, focusKey, employees, blockPageSizes])
+
+  useEffect(() => {
+    setBlockPages({ A: 1, B: 1, C: 1 })
+  }, [salaryPeriod])
 
   const getInput = useCallback((employee: SalaryEmployee): SalaryInput => {
     const base = inputs.find(x => x.employee_id === employee.id)
@@ -568,6 +607,14 @@ export function SalaryDataGrid({
   )
   const probationEmps = useMemo(
     () => employees.filter(e => e.employee_type === 'PROBATION' || e.employee_type === 'INTERN'),
+    [employees]
+  )
+  const traineeEmps = useMemo(
+    () => employees.filter(e => e.employee_type === 'TRAINEE'),
+    [employees]
+  )
+  const payrollEmployees = useMemo(
+    () => employees.filter(e => e.employee_type !== 'TRAINEE'),
     [employees]
   )
 
@@ -588,6 +635,33 @@ export function SalaryDataGrid({
       const inp = getInput(emp)
       return { emp, inp, calc: computeRow(emp, inp, standardDays, salaryPolicy) }
     }), [probationEmps, getInput, standardDays, salaryPolicy]
+  )
+
+  const blockPageCounts = useMemo(() => ({
+    A: Math.max(1, Math.ceil(fulltimeRows.length / blockPageSizes.A)),
+    B: Math.max(1, Math.ceil(probationRows.length / blockPageSizes.B)),
+    C: Math.max(1, Math.ceil(traineeEmps.length / blockPageSizes.C)),
+  }), [fulltimeRows.length, probationRows.length, traineeEmps.length, blockPageSizes])
+
+  useEffect(() => {
+    setBlockPages((previous) => ({
+      A: Math.min(previous.A, blockPageCounts.A),
+      B: Math.min(previous.B, blockPageCounts.B),
+      C: Math.min(previous.C, blockPageCounts.C),
+    }))
+  }, [blockPageCounts])
+
+  const fulltimePageRows = useMemo(
+    () => fulltimeRows.slice((blockPages.A - 1) * blockPageSizes.A, blockPages.A * blockPageSizes.A),
+    [fulltimeRows, blockPages.A, blockPageSizes.A],
+  )
+  const probationPageRows = useMemo(
+    () => probationRows.slice((blockPages.B - 1) * blockPageSizes.B, blockPages.B * blockPageSizes.B),
+    [probationRows, blockPages.B, blockPageSizes.B],
+  )
+  const traineePageEmployees = useMemo(
+    () => traineeEmps.slice((blockPages.C - 1) * blockPageSizes.C, blockPages.C * blockPageSizes.C),
+    [traineeEmps, blockPages.C, blockPageSizes.C],
   )
 
   // Sub-totals
@@ -646,7 +720,7 @@ export function SalaryDataGrid({
   function applyDefaultDays() {
     const days = parseFloat(defaultDaysInput)
     if (isNaN(days) || days < 0) return
-    for (const emp of employees) {
+    for (const emp of payrollEmployees) {
       onCellChange(emp.id, 'actual_working_days', days)
     }
   }
@@ -680,15 +754,15 @@ export function SalaryDataGrid({
   }
 
   function toggleSelectAll() {
-    if (selectedIds.size === employees.length) {
+    if (selectedIds.size === payrollEmployees.length) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(employees.map(e => e.id)))
+      setSelectedIds(new Set(payrollEmployees.map(e => e.id)))
     }
   }
 
-  const allSelected = employees.length > 0 && selectedIds.size === employees.length
-  const someSelected = selectedIds.size > 0 && selectedIds.size < employees.length
+  const allSelected = payrollEmployees.length > 0 && selectedIds.size === payrollEmployees.length
+  const someSelected = selectedIds.size > 0 && selectedIds.size < payrollEmployees.length
 
   // ── Render a data row ─────────────────────────────────────────────────────
   function renderRow(row: RowData, idx: number, block: 'A' | 'B') {
@@ -848,15 +922,15 @@ export function SalaryDataGrid({
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: 3,
               marginRight: 6, background: '#dbeafe', color: '#1d4ed8',
-              borderRadius: 999, fontSize: 10, fontWeight: 700,
+              borderRadius: 999, fontSize: 11, fontWeight: 700,
               padding: '1px 6px',
             }}>
-              ✦ Nhóm {selectedIds.size}
+              <AppIcon name="sparkle" size={12} /> Nhóm {selectedIds.size}
             </span>
           )}
           {emp.fullname}
-          <span style={{ display: 'block', fontSize: 10, fontWeight: 400, color: '#94a3b8' }}>
-            {block === 'A' ? '● Chính thức' : '○ Thử việc'}
+          <span style={{ display: 'block', fontSize: 11, fontWeight: 500, color: '#526979' }}>
+            {block === 'A' ? '● Chính thức' : '○ Thử việc / Học việc'}
           </span>
         </td>
         {/* NPT */}
@@ -901,7 +975,8 @@ export function SalaryDataGrid({
                     ? `Xem hoặc thay chứng từ: ${inp.other_income_document_name}`
                     : 'Nhập lý do và tải chứng từ cho Thu nhập khác'}
                 >
-                  {inp.other_income_document_name ? '📎 Đã tải' : '＋ Tải tệp'}
+                  <AppIcon name={inp.other_income_document_name ? 'check' : 'upload'} size={14} />
+                  {inp.other_income_document_name ? 'Đã tải' : 'Tải tệp'}
                 </button>
               ) : editable && !forcedZero ? (
                 <VndInput
@@ -933,12 +1008,12 @@ export function SalaryDataGrid({
                   )}
                   {col.key === 'contract_salary' && emp.is_mid_month_change && (
                     <div className="flex flex-col w-full text-right gap-[1px]">
-                      <div className="relative group/old w-full text-[10px] leading-tight text-slate-500 font-medium line-through">
+                      <div className="relative group/old w-full text-[11px] leading-tight text-slate-500 font-medium line-through">
                         {fmt(emp.prorated_old_salary || 0)}
                       </div>
                       <div className="relative group/new w-full text-[11px] leading-tight text-emerald-600 font-bold border-t border-slate-200/50 pt-[1px]">
                         {fmt(emp.prorated_new_salary || 0)}
-                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover/new:block z-50 w-auto whitespace-nowrap bg-emerald-800 text-white text-[10px] rounded px-3 py-1.5 shadow-lg pointer-events-none">
+                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover/new:block z-50 w-auto whitespace-nowrap bg-emerald-800 text-white text-[11px] rounded px-3 py-1.5 shadow-lg pointer-events-none">
                           Ngày biến động: {formatDateStr(emp.mid_month_effective_date)}
                         </div>
                       </div>
@@ -946,17 +1021,17 @@ export function SalaryDataGrid({
                   )}
                   {col.key === 'actual_salary' && emp.is_mid_month_change && (
                     <div className="flex flex-col w-full text-right gap-[1px]">
-                      <div className="relative group/oldact w-full text-[10px] leading-tight text-slate-500 font-medium">
+                      <div className="relative group/oldact w-full text-[11px] leading-tight text-slate-500 font-medium">
                         {fmt(actual_salary_old)}
-                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover/oldact:block z-50 w-auto whitespace-nowrap bg-slate-800 text-white text-[10px] rounded px-3 py-1.5 shadow-lg pointer-events-none text-left">
-                          <span className="block text-[9px] text-slate-400 mb-0.5 uppercase tracking-wider">Mức lương cũ:</span>
+                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover/oldact:block z-50 w-auto whitespace-nowrap bg-slate-800 text-white text-[11px] rounded px-3 py-1.5 shadow-lg pointer-events-none text-left">
+                          <span className="block text-[11px] text-slate-400 mb-0.5 uppercase tracking-wider">Mức lương cũ:</span>
                           Từ {getMonthBounds(salaryPeriod).start} đến {getDayBefore(emp.mid_month_effective_date)}
                         </div>
                       </div>
                       <div className="relative group/newact w-full text-[11px] leading-tight text-emerald-600 font-bold border-t border-slate-200/50 pt-[1px]">
                         {fmt(actual_salary_new)}
-                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover/newact:block z-50 w-auto whitespace-nowrap bg-emerald-800 text-white text-[10px] rounded px-3 py-1.5 shadow-lg pointer-events-none text-left">
-                          <span className="block text-[9px] text-emerald-400/80 mb-0.5 uppercase tracking-wider">Mức lương mới:</span>
+                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover/newact:block z-50 w-auto whitespace-nowrap bg-emerald-800 text-white text-[11px] rounded px-3 py-1.5 shadow-lg pointer-events-none text-left">
+                          <span className="block text-[11px] text-emerald-400/80 mb-0.5 uppercase tracking-wider">Mức lương mới:</span>
                           Từ {formatDateStr(emp.mid_month_effective_date)} đến {getMonthBounds(salaryPeriod).end}
                         </div>
                       </div>
@@ -971,59 +1046,306 @@ export function SalaryDataGrid({
     )
   }
 
+  function renderTraineeRow(emp: SalaryEmployee, idx: number) {
+    const inp = getInput(emp)
+    const rowBg = idx % 2 === 0 ? '#ffffff' : '#f8fafc'
+    return (
+      <tr key={emp.id} id={`salary-employee-${emp.id}`} style={{ background: rowBg }}>
+        <td style={{ width: 28, minWidth: 28, textAlign: 'center', color: '#94a3b8' }}>—</td>
+        <td style={{ width: 32, minWidth: 32, padding: '4px 2px', textAlign: 'center', fontSize: 11, color: '#64748b' }}>
+          {idx + 1}
+        </td>
+        <td style={{ width: 70, minWidth: 70, padding: '3px 4px', ...stickyStyles('actual_working_days', rowBg) }}>
+          <input
+            readOnly
+            disabled
+            value={inp.actual_working_days}
+            className={CL.formula}
+            style={{ minWidth: 62, textAlign: 'center' }}
+            title="Ngày công chỉ để đối soát; TTS không tính lương tại bảng này"
+          />
+        </td>
+        <td style={{ width: 160, minWidth: 160, padding: '4px 8px', fontSize: 12, fontWeight: 700, color: SALARY_NEUTRAL_TEXT, ...stickyStyles('fullname', rowBg) }}>
+          {emp.fullname}
+          <span style={{ display: 'block', fontSize: 11, fontWeight: 600, color: SALARY_NEUTRAL_TEXT_MUTED }}>◇ Thực tập sinh</span>
+        </td>
+        <td style={{ width: 44, minWidth: 44, textAlign: 'center', color: '#94a3b8' }}>—</td>
+        <td style={{ width: 100, minWidth: 100, padding: '4px 8px', fontSize: 11, color: SALARY_NEUTRAL_TEXT_MUTED, whiteSpace: 'nowrap' }}>
+          {emp.position || '—'}
+        </td>
+        <td
+          colSpan={ALL_COLS.length - INFO_COL_SPAN}
+          style={{
+            padding: '7px 14px',
+            borderLeft: `1px solid ${SALARY_NEUTRAL_BORDER}`,
+            color: SALARY_NEUTRAL_TEXT_MUTED,
+            fontSize: 11,
+            fontWeight: 700,
+            textAlign: 'left',
+          }}
+        >
+          Không tính vào bảng lương — phụ cấp TTS được quản lý ngoài bảng này, không cần nhập số tiền tại đây.
+        </td>
+      </tr>
+    )
+  }
+
   // ─── Column total width ───────────────────────────────────────────────────
   const totalWidth = ALL_COLS.reduce((s, c) => s + c.w, 0) + 20
+
+  function toggleSelectBlock(blockEmployees: SalaryEmployee[]) {
+    const blockIds = blockEmployees.map((employee) => employee.id)
+    const allBlockSelected = blockIds.length > 0 && blockIds.every((id) => selectedIds.has(id))
+    setSelectedIds((previous) => {
+      const next = new Set(previous)
+      for (const id of blockIds) {
+        if (allBlockSelected) next.delete(id)
+        else next.add(id)
+      }
+      return next
+    })
+  }
+
+  function renderTableHeader(block: 'A' | 'B' | 'C', blockEmployees: SalaryEmployee[]) {
+    const selectable = block !== 'C'
+    const blockIds = blockEmployees.map((employee) => employee.id)
+    const allBlockSelected = selectable && blockIds.length > 0 && blockIds.every((id) => selectedIds.has(id))
+    const someBlockSelected = selectable && blockIds.some((id) => selectedIds.has(id)) && !allBlockSelected
+    return (
+      <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+        <tr>
+          {COL_GROUPS.map(g => (
+            <th
+              key={g.label}
+              colSpan={g.cols.length}
+              style={{
+                background: g.bg, color: g.color,
+                padding: '7px 8px', textAlign: 'center',
+                fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
+                textTransform: 'uppercase', whiteSpace: 'nowrap',
+                borderRight: `1px solid ${SALARY_NEUTRAL_BORDER}`,
+                ...(g.sticky ? {
+                  position: 'sticky' as const,
+                  left: 0,
+                  zIndex: 11,
+                  borderRight: '2px solid #cbd5e1',
+                  boxShadow: '3px 0 6px -2px rgba(0,0,0,0.1)',
+                } : {}),
+              }}
+            >
+              {g.label}
+            </th>
+          ))}
+        </tr>
+        <tr style={{ background: '#f1f5f9' }}>
+          {ALL_COLS.map(col => {
+            const sStyle = stickyStyles(col.key, '#f1f5f9', true)
+            return (
+              <th
+                key={col.key}
+                style={{
+                  padding: '5px 4px', textAlign: 'center',
+                  fontSize: 11, fontWeight: 700, color: '#334155',
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  borderRight: '1px solid #e2e8f0', whiteSpace: 'nowrap',
+                  borderBottom: '2px solid #cbd5e1',
+                  width: `${col.w}px`, minWidth: `${col.w}px`,
+                  ...sStyle,
+                }}
+              >
+                {col.key === '__check__' ? (
+                  selectable ? (
+                    <input
+                      type="checkbox"
+                      id={`chk-select-all-${block}`}
+                      checked={allBlockSelected}
+                      ref={el => { if (el) el.indeterminate = someBlockSelected }}
+                      onChange={() => toggleSelectBlock(blockEmployees)}
+                      style={{
+                        width: 12, height: 12, accentColor: '#163b66', cursor: 'pointer',
+                        verticalAlign: 'middle', margin: 0, padding: 0, border: 'none',
+                        borderRadius: 0, background: 'transparent', boxShadow: 'none',
+                      }}
+                      title={allBlockSelected ? `Bỏ chọn toàn bộ Khối ${block}` : `Chọn toàn bộ Khối ${block}`}
+                    />
+                  ) : '—'
+                ) : (
+                  <>
+                    {(col as any).editable && block !== 'C' && (
+                      <span style={{ display: 'block', width: 5, height: 5, borderRadius: '50%', background: '#64748b', margin: '0 auto 2px' }} />
+                    )}
+                    {col.label}
+                  </>
+                )}
+              </th>
+            )
+          })}
+        </tr>
+      </thead>
+    )
+  }
+
+  function renderBlockPagination(block: 'A' | 'B' | 'C', totalItems: number) {
+    const totalPages = blockPageCounts[block]
+    const currentPage = blockPages[block]
+    const pageSize = blockPageSizes[block]
+    const start = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1
+    const end = Math.min(totalItems, currentPage * pageSize)
+    const setPage = (page: number) => setBlockPages((previous) => ({
+      ...previous,
+      [block]: Math.max(1, Math.min(totalPages, page)),
+    }))
+    const pageButtonStyle = (active = false) => ({
+      minWidth: 32, height: 30, padding: '0 9px', borderRadius: 8,
+      border: active ? '1px solid #0f4c81' : '1px solid #cbd5e1',
+      background: active ? '#0f4c81' : '#ffffff',
+      color: active ? '#ffffff' : '#334155',
+      fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+    }) as const
+    return (
+      <nav
+        aria-label={`Phân trang Khối ${block}`}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '8px 12px', borderTop: '1px solid #e2e8f0', background: '#f8fafc',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+            Hiển thị {start}–{end} trong {totalItems} người
+          </span>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: '#475569', fontSize: 11, fontWeight: 700 }}>
+            Số người/trang
+            <select
+              aria-label={`Số nhân viên mỗi trang Khối ${block}`}
+              value={pageSize}
+              onChange={(event) => {
+                const nextSize = Number(event.target.value)
+                setBlockPageSizes(previous => ({ ...previous, [block]: nextSize }))
+                setBlockPages(previous => ({ ...previous, [block]: 1 }))
+              }}
+              style={{ height: 30, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', color: '#334155', padding: '0 7px', fontSize: 11, fontWeight: 700 }}
+            >
+              {BLOCK_PAGE_SIZE_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <button type="button" onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1}
+            style={{ ...pageButtonStyle(), opacity: currentPage <= 1 ? 0.45 : 1, cursor: currentPage <= 1 ? 'not-allowed' : 'pointer' }}>
+            Trước
+          </button>
+          {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+            <button key={page} type="button" onClick={() => setPage(page)} style={pageButtonStyle(page === currentPage)} aria-current={page === currentPage ? 'page' : undefined}>
+              {page}
+            </button>
+          ))}
+          <button type="button" onClick={() => setPage(currentPage + 1)} disabled={currentPage >= totalPages}
+            style={{ ...pageButtonStyle(), opacity: currentPage >= totalPages ? 0.45 : 1, cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer' }}>
+            Sau
+          </button>
+        </div>
+      </nav>
+    )
+  }
+
+  function renderPayrollBlock(
+    block: 'A' | 'B',
+    title: string,
+    titleBackground: string,
+    titleColor: string,
+    blockEmployees: SalaryEmployee[],
+    pageRows: RowData[],
+    subTotal: SubTotalData,
+    emptyText: string,
+  ) {
+    const startIndex = (blockPages[block] - 1) * blockPageSizes[block]
+    return (
+      <section className="salary-payroll-block" style={{ border: `1px solid ${SALARY_NEUTRAL_BORDER}`, borderRadius: 16, overflow: 'hidden', background: '#ffffff', boxShadow: '0 8px 22px rgba(15,23,42,0.06)' }}>
+        <div className="salary-payroll-block__title" style={{ background: titleBackground, color: titleColor, padding: '10px 14px', fontSize: 12, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', borderBottom: `1px solid ${SALARY_NEUTRAL_BORDER}` }}>
+          {title} · {blockEmployees.length} người
+        </div>
+        <div className="salary-grid-block-scroll">
+          <table className="salary-grid-table" style={{ width: `${totalWidth}px`, minWidth: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 12, fontFamily: 'var(--font-sans)' }}>
+            <colgroup>{ALL_COLS.map(c => <col key={c.key} width={c.w} style={{ width: `${c.w}px`, minWidth: `${c.w}px` }} />)}</colgroup>
+            {renderTableHeader(block, blockEmployees)}
+            <tbody>
+              {blockEmployees.length === 0 ? (
+                <tr><td colSpan={ALL_COLS.length} style={{ textAlign: 'center', padding: 32, color: '#526979', fontSize: 13 }}>{emptyText}</td></tr>
+              ) : pageRows.map((row, index) => renderRow(row, startIndex + index, block))}
+              <SubTotalRow label={`▶ CỘNG KHỐI ${block} — Toàn bộ ${blockEmployees.length} nhân viên`} data={subTotal} />
+            </tbody>
+          </table>
+        </div>
+        {renderBlockPagination(block, blockEmployees.length)}
+      </section>
+    )
+  }
+
+  function renderTraineeBlock() {
+    const startIndex = (blockPages.C - 1) * blockPageSizes.C
+    return (
+      <section className="salary-payroll-block salary-payroll-block--trainee" style={{ border: `1px solid ${SALARY_NEUTRAL_BORDER}`, borderRadius: 16, overflow: 'hidden', background: '#ffffff', boxShadow: '0 8px 22px rgba(15,23,42,0.06)' }}>
+        <div className="salary-payroll-block__title" style={{ background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT, padding: '10px 14px', fontSize: 12, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', borderBottom: `1px solid ${SALARY_NEUTRAL_BORDER}` }}>
+          🅒 KHỐI C — THỰC TẬP SINH (TTS) · {traineeEmps.length} người · KHÔNG TÍNH VÀO BẢNG LƯƠNG
+        </div>
+        <div className="salary-grid-block-scroll">
+          <table className="salary-grid-table" style={{ width: `${totalWidth}px`, minWidth: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 12, fontFamily: 'var(--font-sans)' }}>
+            <colgroup>{ALL_COLS.map(c => <col key={c.key} width={c.w} style={{ width: `${c.w}px`, minWidth: `${c.w}px` }} />)}</colgroup>
+            {renderTableHeader('C', traineeEmps)}
+            <tbody>
+              {traineeEmps.length === 0 ? (
+                <tr><td colSpan={ALL_COLS.length} style={{ textAlign: 'center', padding: 28, color: SALARY_NEUTRAL_TEXT_MUTED, fontSize: 13 }}>Chưa có thực tập sinh trong tháng này.</td></tr>
+              ) : traineePageEmployees.map((employee, index) => renderTraineeRow(employee, startIndex + index))}
+            </tbody>
+          </table>
+        </div>
+        {renderBlockPagination('C', traineeEmps.length)}
+      </section>
+    )
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-[250px] h-auto w-full" style={{ fontFamily: 'Roboto, Arial, sans-serif', display: 'flex', flexDirection: 'column', gap: 0, minWidth: 0 }}>
+    <div className="min-h-[250px] h-auto w-full" style={{ fontFamily: 'var(--font-sans)', display: 'flex', flexDirection: 'column', gap: 0, minWidth: 0 }}>
       <style>{`
         /* Reset min-width of inputs inside the salary table to prevent overflow and overlapping */
         .salary-grid-table td input {
           min-width: 0 !important;
         }
 
-        /* Keep the matrix in one bounded workspace with its own scrollbars. */
-        #root .salary-grid-scroll-region {
+        /* Each payroll block owns its horizontal workspace and never needs an
+           inner vertical scrollbar because pagination limits the visible rows. */
+        #root .salary-grid-block-scroll {
           position: relative !important;
-          height: clamp(420px, 62vh, 720px) !important;
-          min-height: 360px !important;
-          max-height: calc(100vh - 250px) !important;
+          min-height: 0 !important;
           overflow-x: auto !important;
-          overflow-y: scroll !important;
+          overflow-y: hidden !important;
           overscroll-behavior: contain;
-          scrollbar-gutter: stable both-edges;
           scrollbar-width: thin;
           scrollbar-color: #94a3b8 #f1f5f9;
         }
 
-        #root .salary-grid-scroll-region::-webkit-scrollbar {
+        #root .salary-grid-block-scroll::-webkit-scrollbar {
           width: 10px;
           height: 10px;
         }
 
-        #root .salary-grid-scroll-region::-webkit-scrollbar-track {
+        #root .salary-grid-block-scroll::-webkit-scrollbar-track {
           background: #f1f5f9;
           border-radius: 999px;
         }
 
-        #root .salary-grid-scroll-region::-webkit-scrollbar-thumb {
+        #root .salary-grid-block-scroll::-webkit-scrollbar-thumb {
           background: #94a3b8;
           border: 2px solid #f1f5f9;
           border-radius: 999px;
         }
 
-        #root .salary-grid-scroll-region::-webkit-scrollbar-thumb:hover {
+        #root .salary-grid-block-scroll::-webkit-scrollbar-thumb:hover {
           background: #64748b;
-        }
-
-        @media (max-height: 700px) {
-          #root .salary-grid-scroll-region {
-            height: calc(100vh - 220px) !important;
-            min-height: 300px !important;
-          }
         }
       `}</style>
 
@@ -1031,18 +1353,18 @@ export function SalaryDataGrid({
       <div
         style={{
           display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-          background: '#ffffff', borderRadius: '16px 16px 0 0',
-          border: '1px solid #e2e8f0', borderBottom: 'none',
+          background: '#ffffff', borderRadius: 16,
+          border: '1px solid #e2e8f0',
           padding: '8px 14px',
         }}
       >
         {/* Legend */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#64748b' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#64748b' }}>
             <span style={{ width: 12, height: 12, borderRadius: 2, background: '#fff2cc', border: '1px solid #f59e0b', display: 'inline-block', flexShrink: 0 }} />
             Ô nhập tay
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#64748b' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#64748b' }}>
             <span style={{ width: 12, height: 12, borderRadius: 2, background: '#f5f5f5', border: '1px solid #d1d5db', display: 'inline-block', flexShrink: 0 }} />
             Công thức tự động
           </span>
@@ -1053,7 +1375,7 @@ export function SalaryDataGrid({
 
         {/* ── Ngày công mặc định — compact inline ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#166534', whiteSpace: 'nowrap' }}>🗓 Ngày công:</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#166534', whiteSpace: 'nowrap' }}><AppIcon name="calendar" size={14} /> Ngày công:</span>
           <input
             id="salary-default-days"
             type="number"
@@ -1085,9 +1407,9 @@ export function SalaryDataGrid({
             }}
             onMouseEnter={e => { e.currentTarget.style.background = '#15803d' }}
             onMouseLeave={e => { e.currentTarget.style.background = '#16a34a' }}
-            title="Áp ngày công này cho toàn bộ nhân viên"
+            title="Áp ngày công cho Khối A và B; không áp cho thực tập sinh Khối C"
           >
-            Áp tất cả
+            Áp Khối A+B
           </button>
         </div>
 
@@ -1103,7 +1425,7 @@ export function SalaryDataGrid({
               borderRadius: 999, padding: '2px 10px',
               fontSize: 11, fontWeight: 700, color: '#1d4ed8',
             }}>
-              ✦ {selectedIds.size} NV — sửa 1 → áp cả nhóm
+              <AppIcon name="sparkle" size={12} /> {selectedIds.size} NV — sửa 1 → áp cả nhóm
             </span>
             <button
               type="button"
@@ -1112,7 +1434,7 @@ export function SalaryDataGrid({
                 height: 24, padding: '0 8px', borderRadius: 5,
                 background: '#dbeafe', color: '#1d4ed8',
                 border: '1px solid #93c5fd', cursor: 'pointer',
-                fontSize: 10, fontWeight: 700, fontFamily: 'inherit',
+                fontSize: 11, fontWeight: 700, fontFamily: 'inherit',
               }}
             >
               Bỏ chọn
@@ -1155,21 +1477,72 @@ export function SalaryDataGrid({
             onMouseUp={e => { e.currentTarget.style.transform = 'scale(1)' }}
             onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)' }}
           >
-            {isSalaryLocked ? '🔒' : '🔓'}
+            <AppIcon name={isSalaryLocked ? 'lock' : 'unlock'} size={16} />
           </button>
 
           {/* Employee count badges */}
-          <span style={{ fontSize: 10, background: '#dbeafe', color: '#1d4ed8', borderRadius: 999, padding: '2px 8px', fontWeight: 600 }}>
+          <span style={{ fontSize: 11, background: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT, border: `1px solid ${SALARY_NEUTRAL_BORDER}`, borderRadius: 999, padding: '2px 8px', fontWeight: 600 }}>
             Chính thức: {fulltimeEmps.length} NV
           </span>
-          <span style={{ fontSize: 10, background: '#fef3c7', color: '#92400e', borderRadius: 999, padding: '2px 8px', fontWeight: 600 }}>
-            Thử việc: {probationEmps.length} NV
+          <span style={{ fontSize: 11, background: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT, border: `1px solid ${SALARY_NEUTRAL_BORDER}`, borderRadius: 999, padding: '2px 8px', fontWeight: 600 }}>
+            Chưa chính thức: {probationEmps.length} NV
+          </span>
+          <span style={{ fontSize: 11, background: SALARY_NEUTRAL_SURFACE, color: SALARY_NEUTRAL_TEXT, border: `1px solid ${SALARY_NEUTRAL_BORDER}`, borderRadius: 999, padding: '2px 8px', fontWeight: 600 }}>
+            TTS: {traineeEmps.length} NV
           </span>
         </div>
 
       </div>
 
-      {/* ── Scrollable grid container ── */}
+      {/* Ba khối độc lập; mỗi khối có header, thanh cuộn ngang và phân trang riêng. */}
+      <div style={{ display: 'grid', gap: 16, marginTop: 14 }}>
+        {renderPayrollBlock(
+          'A',
+          '🅐 KHỐI A — NHÂN VIÊN CHÍNH THỨC (FULL-TIME)',
+          SALARY_NEUTRAL_SURFACE_STRONG,
+          SALARY_NEUTRAL_TEXT,
+          fulltimeEmps,
+          fulltimePageRows,
+          subTotalA,
+          'Chưa có nhân viên chính thức trong tháng này.',
+        )}
+        {renderPayrollBlock(
+          'B',
+          '🅑 KHỐI B — NHÂN VIÊN THỬ VIỆC / HỌC VIỆC',
+          SALARY_NEUTRAL_SURFACE_STRONG,
+          SALARY_NEUTRAL_TEXT,
+          probationEmps,
+          probationPageRows,
+          subTotalB,
+          'Chưa có nhân viên thử việc hoặc học việc trong tháng này.',
+        )}
+        {renderTraineeBlock()}
+
+        <section className="salary-payroll-grand-total" style={{ border: `1px solid ${SALARY_NEUTRAL_BORDER}`, borderRadius: 16, background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT, padding: '14px 16px', boxShadow: '0 10px 24px rgba(15,23,42,0.08)' }}>
+          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            ∑ Tổng cộng lương Khối A + B — không gồm Khối C · {payrollEmployees.length} nhân viên
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10, marginTop: 10 }}>
+            {[
+              ['Lương theo ngày công', grandTotal.actual_salary],
+              ['Tổng BH người lao động', grandTotal.total_ins_emp],
+              ['Thuế TNCN', grandTotal.pit_tax],
+              ['Thực nhận', grandTotal.net_salary],
+              ['Chuyển khoản cuối', grandTotal.final_transfer],
+            ].map(([label, value]) => (
+              <div key={String(label)} style={{ border: `1px solid ${SALARY_NEUTRAL_BORDER}`, borderRadius: 12, padding: '9px 11px', background: '#ffffff' }}>
+                <div style={{ fontSize: 11, color: SALARY_NEUTRAL_TEXT_MUTED, textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
+                <div style={{ marginTop: 4, fontSize: 15, color: SALARY_NEUTRAL_TEXT, fontWeight: 800, textAlign: 'right' }}>{fmt(Number(value))}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      {/* Legacy combined matrix retained temporarily for formula parity only;
+          it is not rendered because the three independent blocks above are
+          now the user-facing payroll workspace. */}
+      {SHOW_LEGACY_COMBINED_MATRIX && (
       <div
         className="salary-grid-scroll-region w-full border border-slate-200 rounded-b-2xl bg-white shadow-sm"
         style={{
@@ -1182,7 +1555,7 @@ export function SalaryDataGrid({
           style={{
             width: `${totalWidth}px`, minWidth: '100%', borderCollapse: 'collapse',
             tableLayout: 'fixed',
-            fontSize: 12, fontFamily: 'Roboto, Arial, sans-serif',
+            fontSize: 12, fontFamily: 'var(--font-sans)',
           }}
         >
           {/* ── COLGROUP for width hints ── */}
@@ -1201,9 +1574,9 @@ export function SalaryDataGrid({
                    style={{
                      background: g.bg, color: g.color,
                      padding: '7px 8px', textAlign: 'center',
-                     fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+                     fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
                      textTransform: 'uppercase', whiteSpace: 'nowrap',
-                     borderRight: '2px solid rgba(255,255,255,0.25)',
+                     borderRight: `1px solid ${SALARY_NEUTRAL_BORDER}`,
                      ...(g.sticky ? { 
                        position: 'sticky' as const, 
                        left: 0, 
@@ -1226,7 +1599,7 @@ export function SalaryDataGrid({
                     key={col.key}
                     style={{
                       padding: '5px 4px', textAlign: 'center',
-                      fontSize: 9, fontWeight: 700, color: '#334155',
+                      fontSize: 11, fontWeight: 700, color: '#334155',
                       letterSpacing: '0.06em', textTransform: 'uppercase',
                       borderRight: '1px solid #e2e8f0', whiteSpace: 'nowrap',
                       borderBottom: '2px solid #cbd5e1',
@@ -1264,7 +1637,7 @@ export function SalaryDataGrid({
                     <>
                       {/* Editable indicator dot */}
                       {(col as any).editable && (
-                        <span style={{ display: 'block', width: 5, height: 5, borderRadius: '50%', background: '#f59e0b', margin: '0 auto 2px' }} />
+                        <span style={{ display: 'block', width: 5, height: 5, borderRadius: '50%', background: '#64748b', margin: '0 auto 2px' }} />
                       )}
                       {col.label}
                     </>
@@ -1281,7 +1654,7 @@ export function SalaryDataGrid({
               <td
                 colSpan={ALL_COLS.length}
                 style={{
-                  background: '#1d4ed8', color: '#ffffff',
+                  background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT,
                   padding: '6px 14px', fontSize: 11, fontWeight: 700,
                   letterSpacing: '0.12em', textTransform: 'uppercase',
                 }}
@@ -1292,7 +1665,7 @@ export function SalaryDataGrid({
 
             {fulltimeEmps.length === 0 ? (
               <tr>
-                <td colSpan={ALL_COLS.length} style={{ textAlign: 'center', padding: 32, color: '#94a3b8', fontSize: 13 }}>
+                <td colSpan={ALL_COLS.length} style={{ textAlign: 'center', padding: 32, color: '#526979', fontSize: 13 }}>
                   Chưa có nhân viên chính thức trong tháng này.
                 </td>
               </tr>
@@ -1308,7 +1681,7 @@ export function SalaryDataGrid({
               <td
                 colSpan={ALL_COLS.length}
                 style={{
-                  background: '#92400e', color: '#fef3c7',
+                  background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT,
                   padding: '6px 14px', fontSize: 11, fontWeight: 700,
                   letterSpacing: '0.12em', textTransform: 'uppercase',
                   borderTop: '3px solid #ffffff',
@@ -1320,7 +1693,7 @@ export function SalaryDataGrid({
 
             {probationEmps.length === 0 ? (
               <tr>
-                <td colSpan={ALL_COLS.length} style={{ textAlign: 'center', padding: 32, color: '#94a3b8', fontSize: 13 }}>
+                <td colSpan={ALL_COLS.length} style={{ textAlign: 'center', padding: 32, color: '#526979', fontSize: 13 }}>
                   Chưa có nhân viên thử việc trong tháng này.
                 </td>
               </tr>
@@ -1331,15 +1704,38 @@ export function SalaryDataGrid({
             {/* Sub-total B */}
             <SubTotalRow label="▶ CỘNG KHỐI B — Nhân viên thử việc" data={subTotalB} />
 
+            {/* ════ KHỐI C: THỰC TẬP SINH — KHÔNG TÍNH LƯƠNG ════ */}
+            <tr>
+              <td
+                colSpan={ALL_COLS.length}
+                style={{
+                  background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT,
+                  padding: '6px 14px', fontSize: 11, fontWeight: 700,
+                  letterSpacing: '0.12em', textTransform: 'uppercase',
+                  borderTop: '3px solid #ffffff',
+                }}
+              >
+                🅒 KHỐI C — THỰC TẬP SINH (TTS) · {traineeEmps.length} người · KHÔNG TÍNH VÀO BẢNG LƯƠNG
+              </td>
+            </tr>
+
+            {traineeEmps.length === 0 ? (
+              <tr>
+                <td colSpan={ALL_COLS.length} style={{ textAlign: 'center', padding: 24, color: SALARY_NEUTRAL_TEXT_MUTED, fontSize: 13 }}>
+                  Chưa có thực tập sinh trong tháng này.
+                </td>
+              </tr>
+            ) : traineeEmps.map(renderTraineeRow)}
+
             {/* ════ GRAND TOTAL ════ */}
             <tr>
               {/* Checkbox & STT */}
               <td
                 colSpan={2}
                 style={{
-                  background: '#0f172a', color: '#f8fafc',
+                  background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT,
                   padding: '8px 14px', fontSize: 12, fontWeight: 800,
-                  borderTop: '3px solid #163b66',
+                  borderTop: `3px solid ${SALARY_NEUTRAL_BORDER}`,
                   textAlign: 'center',
                 }}
               >
@@ -1348,9 +1744,9 @@ export function SalaryDataGrid({
               {/* Ngày công (sticky) */}
               <td
                 style={{
-                  background: '#0f172a', color: '#f8fafc',
+                  background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT,
                   padding: '8px 6px', fontSize: 12, fontWeight: 800,
-                  borderTop: '3px solid #163b66',
+                  borderTop: `3px solid ${SALARY_NEUTRAL_BORDER}`,
                   position: 'sticky',
                   left: 0,
                   zIndex: 2,
@@ -1363,9 +1759,9 @@ export function SalaryDataGrid({
               <td
                 colSpan={3}
                 style={{
-                  background: '#0f172a', color: '#f8fafc',
+                  background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT,
                   padding: '8px 14px', fontSize: 12, fontWeight: 800,
-                  borderTop: '3px solid #163b66',
+                  borderTop: `3px solid ${SALARY_NEUTRAL_BORDER}`,
                   position: 'sticky',
                   left: 70,
                   zIndex: 2,
@@ -1376,7 +1772,7 @@ export function SalaryDataGrid({
                   whiteSpace: 'nowrap',
                 }}
               >
-                ∑ TỔNG CỘNG HỆ THỐNG (A + B) &nbsp;—&nbsp; {employees.length} nhân viên
+                ∑ TỔNG CỘNG LƯƠNG (A + B, KHÔNG GỒM C) &nbsp;—&nbsp; {payrollEmployees.length} nhân viên
               </td>
               {ALL_COLS.slice(INFO_COL_SPAN).map(col => {
                 const skipKeys = new Set(['actual_working_days'])
@@ -1413,20 +1809,15 @@ export function SalaryDataGrid({
                   advance_payment: grandTotal.advance_payment,
                   final_transfer: grandTotal.final_transfer,
                 }
-                const textColor =
-                  col.key === 'final_transfer' ? '#34d399'
-                  : col.key === 'pit_tax'       ? '#fca5a5'
-                  : col.key === 'net_salary'    ? '#93c5fd'
-                  : '#e2e8f0'
                 return (
                   <td
                     key={col.key}
                     style={{
-                      background: '#0f172a', color: textColor,
+                      background: SALARY_NEUTRAL_SURFACE_STRONG, color: SALARY_NEUTRAL_TEXT,
                       padding: '7px 6px', fontSize: 11, fontWeight: 800,
                       textAlign: 'right', whiteSpace: 'nowrap',
-                      borderTop: '3px solid #163b66',
-                      borderRight: '1px solid #1e293b',
+                      borderTop: `3px solid ${SALARY_NEUTRAL_BORDER}`,
+                      borderRight: `1px solid ${SALARY_NEUTRAL_BORDER}`,
                       width: `${col.w}px`,
                       minWidth: `${col.w}px`,
                     }}
@@ -1441,13 +1832,14 @@ export function SalaryDataGrid({
 
         {/* Empty state */}
         {employees.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#94a3b8' }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#526979' }}>
+            <AppIcon name="chart" size={40} style={{ margin: '0 auto 12px' }} />
             <p style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>Chưa có dữ liệu bảng lương</p>
             <p style={{ fontSize: 12 }}>Nhấn "Tải dữ liệu" hoặc chọn tháng lương khác để bắt đầu.</p>
           </div>
         )}
       </div>
+      )}
 
       {/* ── Bottom note ── */}
       <div
@@ -1456,23 +1848,23 @@ export function SalaryDataGrid({
           padding: '10px 4px', fontSize: 11, color: '#64748b',
         }}
       >
-        <span>
-          🔵 <b>BHXH NLĐ</b>: 8% &nbsp;|&nbsp;
+        <span className="salary-note-legend salary-note-legend--employee" style={{ color: SALARY_NEUTRAL_TEXT_MUTED }}>
+          <i aria-hidden="true" /> <b>BHXH NLĐ</b>: 8% &nbsp;|&nbsp;
           <b>BHYT</b>: 1.5% &nbsp;|&nbsp;
           <b>BHTN</b>: 1% &nbsp;=&nbsp; <b>10.5% tổng NLĐ chịu</b>
         </span>
-        <span>
-          🟣 <b>BHXH DN</b>: 17.5% &nbsp;|&nbsp;
+        <span className="salary-note-legend salary-note-legend--company" style={{ color: SALARY_NEUTRAL_TEXT_MUTED }}>
+          <i aria-hidden="true" /> <b>BHXH DN</b>: 17.5% &nbsp;|&nbsp;
           <b>BHYT</b>: 3% &nbsp;|&nbsp;
           <b>BHTN</b>: 1% &nbsp;+&nbsp;
           <b>KP CĐ</b>: 2% &nbsp;=&nbsp; <b>23.5% chi phí DN</b>
         </span>
-        <span>
-          🔴 <b>Giảm trừ BT</b>: 15,500,000đ &nbsp;|&nbsp;
+        <span className="salary-note-legend salary-note-legend--deduction" style={{ color: SALARY_NEUTRAL_TEXT_MUTED }}>
+          <i aria-hidden="true" /> <b>Giảm trừ BT</b>: 15,500,000đ &nbsp;|&nbsp;
           <b>NPT</b>: 6,200,000đ/người
         </span>
-        <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>
-          ✦ Thuế TNCN thử việc: 10% cào bằng nếu TN ≥ 2,000,000đ
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginLeft: 'auto', fontStyle: 'italic' }}>
+          <AppIcon name="sparkle" size={13} /> Thuế TNCN thử việc: 10% cào bằng nếu TN ≥ 2,000,000đ
         </span>
       </div>
     </div>

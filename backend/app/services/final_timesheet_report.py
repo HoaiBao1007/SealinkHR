@@ -8,13 +8,16 @@ from typing import Any, Iterable
 import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.models.attendance_daily import AttendanceDaily
 from app.models.employee import Employee
+from app.models.holiday_setting import HolidaySetting
 from app.models.off_request import OffRequest
 from app.models.timesheet import Timesheet
 from app.models.timesheet_entry import TimesheetEntry
+from app.models.timesheet_period import TimesheetPeriod
 
 
 WEEKDAY_LABELS = {
@@ -51,10 +54,14 @@ class FinalTimesheetEmployeeInput:
     previous_paid_leave_balance: float = 0.0
     current_month_paid_leave_credit: float = 0.0
     stored_total_work_days: float | None = None
+    stored_total_payroll_days: float | None = None
     stored_total_paid_leave_days: float | None = None
     stored_total_unpaid_leave_days: float | None = None
     stored_total_absent_days: float | None = None
     stored_total_late_minutes: int | None = None
+    stored_remaining_paid_leave_days: float | None = None
+    prefer_stored_totals: bool = False
+    preserve_leave_snapshot: bool = False
 
 
 @dataclass
@@ -111,6 +118,7 @@ class FinalTimesheetRow:
     total_early_minutes: int
     total_absent_days: float
     total_work_days: float
+    total_payroll_days: float
     unpaid_leave_days: float
     paid_leave_days: float
     previous_paid_leave_balance: float
@@ -167,13 +175,18 @@ def _iter_period_dates(period_start: date, period_end: date) -> list[date]:
     return days
 
 
-def _build_day_columns(period_start: date, period_end: date) -> list[FinalTimesheetDayColumn]:
+def _build_day_columns(
+    period_start: date,
+    period_end: date,
+    working_day_overrides: set[date] | None = None,
+) -> list[FinalTimesheetDayColumn]:
+    working_day_overrides = working_day_overrides or set()
     return [
         FinalTimesheetDayColumn(
             key=work_date.isoformat(),
             day_number=work_date.day,
             weekday_label=WEEKDAY_LABELS[work_date.weekday()],
-            is_weekend=work_date.weekday() >= 5,
+            is_weekend=work_date.weekday() >= 5 and work_date not in working_day_overrides,
         )
         for work_date in _iter_period_dates(period_start, period_end)
     ]
@@ -313,12 +326,29 @@ def _build_off_request_map(
 
 
 def _work_units_for_symbol(symbol: str) -> float:
+    """Return payable work units represented by an attendance symbol.
+
+    This intentionally includes WFH/business-trip days represented as
+    ``X``/``CT`` even when there is no fingerprint-machine punch. It is used
+    to derive payroll days, not actual clocked days.
+    """
     symbol = _clean_symbol(symbol)
     if symbol in {"X", "CT"}:
         return 1.0
     if symbol in {"X/P", "P/X", "X/Ro", "Ro/X"}:
         return 0.5
     return 0.0
+
+
+def _clocked_work_units_for_symbol(
+    symbol: str,
+    check_in_time: str | None,
+    check_out_time: str | None,
+) -> float:
+    """Return actual work units backed by at least one machine punch."""
+    if not _effective_time(check_in_time, check_out_time):
+        return 0.0
+    return _work_units_for_symbol(symbol)
 
 
 def _paid_leave_units_for_symbol(symbol: str) -> float:
@@ -361,8 +391,10 @@ def _resolve_display_symbol(
     # 1. Admin manual override takes ultimate precedence
     if entry and getattr(entry, "is_overridden", False):
         explicit_symbol = _clean_symbol(entry.final_symbol)
-        if explicit_symbol:
-            return explicit_symbol, bool(leave_detail and leave_detail.get("valid_leave")), True
+        # An accountant-approved blank is also an explicit decision (for
+        # example dates before a new employee starts). Do not turn it back
+        # into Ro merely because an AttendanceDaily placeholder exists.
+        return explicit_symbol, bool(leave_detail and leave_detail.get("valid_leave")), bool(explicit_symbol)
 
     check_in_time = _effective_time(entry.check_in_time if entry else None, daily.check_in_time if daily else None)
     check_out_time = _effective_time(entry.check_out_time if entry else None, daily.check_out_time if daily else None)
@@ -453,8 +485,9 @@ def build_final_timesheet_report(
     daily_records: Iterable[FinalTimesheetDailyInput],
     entry_records: Iterable[FinalTimesheetEntryInput] | None = None,
     off_requests: Iterable[FinalTimesheetOffRequestInput] | None = None,
+    working_day_overrides: set[date] | None = None,
 ) -> FinalTimesheetReport:
-    day_columns = _build_day_columns(period_start, period_end)
+    day_columns = _build_day_columns(period_start, period_end, working_day_overrides)
     day_keys = [column.key for column in day_columns]
     daily_map = {(row.employee_id, row.work_date): row for row in daily_records}
     entry_map = {(row.employee_id, row.work_date): row for row in (entry_records or [])}
@@ -469,6 +502,7 @@ def build_final_timesheet_report(
         total_early_minutes = 0
         total_absent_days = 0.0
         total_work_days = 0.0
+        payable_work_days = 0.0
         unpaid_leave_days = 0.0
         paid_leave_days = 0.0
         has_detail = False
@@ -493,9 +527,18 @@ def build_final_timesheet_report(
 
             late_minutes = int(daily.late_minutes if daily else 0)
             early_minutes = int(daily.early_minutes if daily else 0)
+            check_in_time = _effective_time(
+                entry.check_in_time if entry else None,
+                daily.check_in_time if daily else None,
+            )
+            check_out_time = _effective_time(
+                entry.check_out_time if entry else None,
+                daily.check_out_time if daily else None,
+            )
             total_late_minutes += late_minutes
             total_early_minutes += early_minutes
-            total_work_days += _work_units_for_symbol(display_symbol)
+            total_work_days += _clocked_work_units_for_symbol(display_symbol, check_in_time, check_out_time)
+            payable_work_days += _work_units_for_symbol(display_symbol)
             paid_leave_days += _paid_leave_units_for_symbol(display_symbol)
             absent_units = _absent_units_for_symbol(display_symbol)
             unpaid_leave_days += absent_units
@@ -517,23 +560,41 @@ def build_final_timesheet_report(
             if daily is not None or entry is not None or leave_detail is not None or display_symbol:
                 has_detail = True
 
-        if not has_detail:
-            total_work_days = _round_leave(employee.stored_total_work_days or 0)
-            paid_leave_days = _round_leave(employee.stored_total_paid_leave_days or 0)
-            unpaid_leave_days = _round_leave(employee.stored_total_unpaid_leave_days or 0)
-            total_absent_days = _round_leave(employee.stored_total_absent_days or 0)
-            total_late_minutes = int(employee.stored_total_late_minutes or 0)
+        if not has_detail or employee.prefer_stored_totals:
+            if employee.stored_total_work_days is not None:
+                total_work_days = _round_leave(employee.stored_total_work_days)
+                if not has_detail:
+                    payable_work_days = total_work_days
+            if employee.stored_total_paid_leave_days is not None:
+                paid_leave_days = _round_leave(employee.stored_total_paid_leave_days)
+            if employee.stored_total_unpaid_leave_days is not None:
+                unpaid_leave_days = _round_leave(employee.stored_total_unpaid_leave_days)
+            if employee.stored_total_absent_days is not None:
+                total_absent_days = _round_leave(employee.stored_total_absent_days)
+            if employee.stored_total_late_minutes is not None:
+                total_late_minutes = int(employee.stored_total_late_minutes)
+
+        total_payroll_days = _round_leave(
+            employee.stored_total_payroll_days
+            if employee.stored_total_payroll_days is not None
+            else payable_work_days + paid_leave_days
+        )
 
         is_fulltime = str(employee.employee_type or "FULLTIME").upper() == "FULLTIME"
-        previous_paid_leave_balance = _round_leave(employee.previous_paid_leave_balance if is_fulltime else 0)
-        current_month_paid_leave_credit = _round_leave(employee.current_month_paid_leave_credit if is_fulltime else 0)
-        # Công thức này khớp template Final của kế toán: Ro chỉ trừ phần phép
-        # còn lại khi số dư vẫn không âm, còn phép hưởng lương luôn được trừ.
-        possible_remaining = previous_paid_leave_balance + current_month_paid_leave_credit - unpaid_leave_days - paid_leave_days
-        remaining_paid_leave_days = _round_leave(
-            possible_remaining
-            if possible_remaining >= 0
-            else previous_paid_leave_balance + current_month_paid_leave_credit - paid_leave_days
+        previous_paid_leave_balance = _round_leave(employee.previous_paid_leave_balance)
+        current_month_paid_leave_credit = _round_leave(
+            employee.current_month_paid_leave_credit
+            if is_fulltime or employee.preserve_leave_snapshot
+            else 0
+        )
+        # Chỉ phép hưởng lương tiêu hao quỹ phép năm. Nghỉ không lương (Ro)
+        # được theo dõi riêng và không được làm giảm số dư phép hưởng lương.
+        remaining_paid_leave_days = (
+            _round_leave(employee.stored_remaining_paid_leave_days)
+            if employee.preserve_leave_snapshot and employee.stored_remaining_paid_leave_days is not None
+            else _round_leave(
+                max(0.0, previous_paid_leave_balance + current_month_paid_leave_credit - paid_leave_days)
+            )
         )
 
         rows.append(
@@ -549,6 +610,7 @@ def build_final_timesheet_report(
                 total_early_minutes=total_early_minutes,
                 total_absent_days=_round_leave(total_absent_days),
                 total_work_days=_round_leave(total_work_days),
+                total_payroll_days=total_payroll_days,
                 unpaid_leave_days=_round_leave(unpaid_leave_days),
                 paid_leave_days=_round_leave(paid_leave_days),
                 previous_paid_leave_balance=previous_paid_leave_balance,
@@ -567,12 +629,16 @@ def build_final_timesheet_report(
 
 
 def build_final_timesheet_report_from_db(db: Session, period_start: date, period_end: date) -> FinalTimesheetReport:
-    timesheets = (
+    period_timesheets = (
         db.query(Timesheet)
         .filter(Timesheet.period_start == period_start, Timesheet.period_end == period_end)
         .order_by(Timesheet.employee_id.asc())
         .all()
     )
+    excluded_employee_ids = {
+        row.employee_id for row in period_timesheets if str(row.approval_status or "").lower() == "excluded"
+    }
+    timesheets = [row for row in period_timesheets if row.employee_id not in excluded_employee_ids]
     daily_rows = (
         db.query(AttendanceDaily)
         .filter(AttendanceDaily.period_start == period_start, AttendanceDaily.period_end == period_end)
@@ -600,6 +666,7 @@ def build_final_timesheet_report_from_db(db: Session, period_start: date, period
     employee_ids.update(row.employee_id for row in entry_rows)
     employee_ids.update(row.employee_id for row in off_requests)
     employee_ids.update(row.employee_id for row in timesheets)
+    employee_ids.difference_update(excluded_employee_ids)
 
     employees: list[Employee] = []
     if employee_ids:
@@ -611,6 +678,69 @@ def build_final_timesheet_report_from_db(db: Session, period_start: date, period
         )
 
     timesheet_map = {row.employee_id: row for row in timesheets}
+    def monthly_paid_leave_credit(employee: Employee) -> float:
+        if str(employee.employee_type or "FULLTIME").upper() != "FULLTIME":
+            return 0.0
+        return round(float(employee.annual_leave_quota or 0) / 12, 2)
+
+    previous_balance_by_employee = {
+        employee.id: float(employee.paid_leave_balance or 0)
+        for employee in employees
+    }
+    if employee_ids:
+        prior_locked_timesheets = (
+            db.query(Timesheet)
+            .join(
+                TimesheetPeriod,
+                and_(
+                    TimesheetPeriod.period_start == Timesheet.period_start,
+                    TimesheetPeriod.period_end == Timesheet.period_end,
+                ),
+            )
+            .filter(
+                TimesheetPeriod.is_locked.is_(True),
+                Timesheet.period_end < period_start,
+                Timesheet.employee_id.in_(sorted(employee_ids)),
+            )
+            .order_by(Timesheet.employee_id.asc(), Timesheet.period_end.asc(), Timesheet.id.asc())
+            .all()
+        )
+        employees_by_id = {employee.id: employee for employee in employees}
+        for prior in prior_locked_timesheets:
+            employee = employees_by_id.get(prior.employee_id)
+            if employee is None:
+                continue
+            previous_balance = previous_balance_by_employee[prior.employee_id]
+            if prior.remaining_paid_leave_days is not None:
+                previous_balance_by_employee[prior.employee_id] = float(prior.remaining_paid_leave_days)
+                continue
+            prior_opening = (
+                float(prior.previous_paid_leave_balance)
+                if prior.previous_paid_leave_balance is not None
+                else previous_balance
+            )
+            prior_credit = (
+                float(prior.current_month_paid_leave_credit)
+                if prior.current_month_paid_leave_credit is not None
+                else monthly_paid_leave_credit(employee)
+            )
+            previous_balance_by_employee[prior.employee_id] = max(
+                0.0,
+                prior_opening + prior_credit - float(prior.total_paid_leave_days or 0),
+            )
+
+    def previous_balance_for(employee: Employee) -> float:
+        current = timesheet_map.get(employee.id)
+        if current and current.previous_paid_leave_balance is not None:
+            return float(current.previous_paid_leave_balance)
+        return previous_balance_by_employee.get(employee.id, 0.0)
+
+    def current_credit_for(employee: Employee) -> float:
+        current = timesheet_map.get(employee.id)
+        if current and current.current_month_paid_leave_credit is not None:
+            return float(current.current_month_paid_leave_credit)
+        return monthly_paid_leave_credit(employee)
+
     employee_inputs = [
         FinalTimesheetEmployeeInput(
             employee_id=employee.id,
@@ -620,13 +750,31 @@ def build_final_timesheet_report_from_db(db: Session, period_start: date, period
             full_name=employee.full_name,
             department_name=employee.department_name,
             employee_type=employee.employee_type,
-            previous_paid_leave_balance=float(employee.paid_leave_balance or 0),
-            current_month_paid_leave_credit=round(float(employee.annual_leave_quota or 0) / 12, 2),
+            previous_paid_leave_balance=previous_balance_for(employee),
+            current_month_paid_leave_credit=current_credit_for(employee),
             stored_total_work_days=float(timesheet_map[employee.id].total_work_days) if employee.id in timesheet_map else None,
+            stored_total_payroll_days=(
+                float(timesheet_map[employee.id].total_payroll_days)
+                if employee.id in timesheet_map and timesheet_map[employee.id].total_payroll_days is not None
+                else None
+            ),
             stored_total_paid_leave_days=float(timesheet_map[employee.id].total_paid_leave_days) if employee.id in timesheet_map else None,
             stored_total_unpaid_leave_days=float(timesheet_map[employee.id].total_unpaid_leave_days) if employee.id in timesheet_map else None,
             stored_total_absent_days=float(timesheet_map[employee.id].total_absent_days) if employee.id in timesheet_map else None,
             stored_total_late_minutes=int(timesheet_map[employee.id].total_late_minutes) if employee.id in timesheet_map else None,
+            stored_remaining_paid_leave_days=(
+                float(timesheet_map[employee.id].remaining_paid_leave_days)
+                if employee.id in timesheet_map and timesheet_map[employee.id].remaining_paid_leave_days is not None
+                else None
+            ),
+            prefer_stored_totals=(
+                employee.id in timesheet_map
+                and str(timesheet_map[employee.id].approval_status or "").lower() == "approved"
+            ),
+            preserve_leave_snapshot=(
+                employee.id in timesheet_map
+                and str(timesheet_map[employee.id].approval_status or "").lower() == "approved"
+            ),
         )
         for employee in employees
     ]
@@ -667,6 +815,16 @@ def build_final_timesheet_report_from_db(db: Session, period_start: date, period
         )
         for row in off_requests
     ]
+    working_day_overrides = {
+        row.holiday_date
+        for row in db.query(HolidaySetting)
+        .filter(
+            HolidaySetting.is_working_day.is_(True),
+            HolidaySetting.holiday_date >= period_start,
+            HolidaySetting.holiday_date <= period_end,
+        )
+        .all()
+    }
 
     return build_final_timesheet_report(
         period_start=period_start,
@@ -675,6 +833,7 @@ def build_final_timesheet_report_from_db(db: Session, period_start: date, period
         daily_records=daily_inputs,
         entry_records=entry_inputs,
         off_requests=off_request_inputs,
+        working_day_overrides=working_day_overrides,
     )
 
 
@@ -775,11 +934,13 @@ def serialize_final_timesheet_report(report: FinalTimesheetReport) -> dict[str, 
                 "full_name": row.full_name,
                 "department_name": row.department_name,
                 "days": row.days,
+                "override_reasons": row.override_reasons,
                 "abnormal_days": row.abnormal_days,
                 "total_late_minutes": row.total_late_minutes,
                 "total_early_minutes": row.total_early_minutes,
                 "total_absent_days": row.total_absent_days,
                 "total_work_days": row.total_work_days,
+                "total_payroll_days": row.total_payroll_days,
                 "unpaid_leave_days": row.unpaid_leave_days,
                 "paid_leave_days": row.paid_leave_days,
                 "previous_paid_leave_balance": row.previous_paid_leave_balance,
@@ -836,7 +997,7 @@ def export_to_final_timesheet(data: FinalTimesheetReport | dict[str, Any]) -> By
         except ValueError:
             display_id = row.machine_employee_id
 
-        ngay_cong = row.total_work_days + row.paid_leave_days
+        ngay_cong = row.total_payroll_days
         ngay_cong_tt = row.total_work_days
 
         body_rows.append(
@@ -1028,11 +1189,22 @@ def _dict_to_report(payload: dict[str, Any]) -> FinalTimesheetReport:
                 full_name=str(item.get("full_name", "")),
                 department_name=item.get("department_name"),
                 days={str(key): str(value or "") for key, value in item.get("days", {}).items()},
+                override_reasons={
+                    str(key): str(value or "")
+                    for key, value in item.get("override_reasons", {}).items()
+                },
                 abnormal_days=int(item.get("abnormal_days", 0)),
                 total_late_minutes=int(item.get("total_late_minutes", 0)),
                 total_early_minutes=int(item.get("total_early_minutes", 0)),
                 total_absent_days=_round_leave(item.get("total_absent_days", 0)),
                 total_work_days=_round_leave(item.get("total_work_days", 0)),
+                total_payroll_days=_round_leave(
+                    item.get(
+                        "total_payroll_days",
+                        _round_leave(item.get("total_work_days", 0))
+                        + _round_leave(item.get("paid_leave_days", 0)),
+                    )
+                ),
                 unpaid_leave_days=_round_leave(item.get("unpaid_leave_days", 0)),
                 paid_leave_days=_round_leave(item.get("paid_leave_days", 0)),
                 previous_paid_leave_balance=_round_leave(item.get("previous_paid_leave_balance", 0)),

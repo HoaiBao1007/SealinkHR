@@ -18,6 +18,7 @@ from app.models.timesheet_entry import TimesheetEntry
 from app.models.monthly_salary_input import MonthlySalaryInput
 from app.api.importer import resolve_period_for_work_date
 from app.services.final_timesheet_report import (
+    _clocked_work_units_for_symbol,
     _work_units_for_symbol,
     _paid_leave_units_for_symbol,
     _absent_units_for_symbol,
@@ -153,9 +154,8 @@ def commit_checkin_profile(
     skipped: list[dict[str, str]] = []
     affected_timesheets = set()
 
-    # Resolve both the primary machine ID and the optional secondary biometric
-    # ID, then merge all rows belonging to the same employee/day. This covers
-    # employees (such as Ruby) that use two fingerprint profiles.
+    # Resolve the single authoritative machine ID, then merge duplicate rows
+    # belonging to the same employee/day within the imported file.
     grouped_items: dict[tuple[int, date], dict] = {}
     for item in data.items:
         if not item.work_date:
@@ -168,9 +168,7 @@ def commit_checkin_profile(
             continue
 
         cleaned_id = clean_machine_id(item.machine_employee_id)
-        emp = db.query(Employee).filter(
-            (Employee.machine_employee_id == cleaned_id) | (Employee.biometric_id == cleaned_id)
-        ).first()
+        emp = db.query(Employee).filter(Employee.machine_employee_id == cleaned_id).first()
         if not emp:
             skipped.append(
                 {
@@ -437,8 +435,18 @@ def commit_checkin_profile(
 
             entries = db.query(TimesheetEntry).filter(TimesheetEntry.timesheet_id == ts.id).all()
 
-            ts.total_work_days = float(sum(_work_units_for_symbol(e.final_symbol) for e in entries))
+            ts.total_work_days = float(sum(
+                _clocked_work_units_for_symbol(e.final_symbol, e.check_in_time, e.check_out_time)
+                for e in entries
+            ))
             ts.total_paid_leave_days = float(sum(_paid_leave_units_for_symbol(e.final_symbol) for e in entries))
+            # Raw machine imports have no accountant-approved column yet. Keep
+            # an existing approved accountant value immutable; otherwise set a
+            # provisional payable value from the currently available rules.
+            if ts.total_payroll_days is None or str(ts.approval_status or "").lower() != "approved":
+                ts.total_payroll_days = float(
+                    sum(_work_units_for_symbol(e.final_symbol) for e in entries)
+                ) + ts.total_paid_leave_days
 
             unpaid = float(sum(_absent_units_for_symbol(e.final_symbol) for e in entries))
             ts.total_unpaid_leave_days = unpaid
@@ -459,7 +467,7 @@ def commit_checkin_profile(
                 salary_input = MonthlySalaryInput(
                     employee_id=employee_id,
                     salary_period=salary_period,
-                    actual_working_days=ts.total_work_days + ts.total_paid_leave_days,
+                    actual_working_days=ts.total_payroll_days,
                     meal_allowance_free=1200000,
                     meal_allowance_tax=0,
                     phone_allowance_free=2000000,
@@ -475,7 +483,7 @@ def commit_checkin_profile(
                 )
                 db.add(salary_input)
             elif salary_input:
-                salary_input.actual_working_days = ts.total_work_days + ts.total_paid_leave_days
+                salary_input.actual_working_days = ts.total_payroll_days
 
             db.commit()
 

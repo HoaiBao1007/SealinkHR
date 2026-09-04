@@ -1,4 +1,4 @@
-from app.core.roles import ADMIN, HR_ADMIN, IT_ADMIN, USER
+from app.core.roles import ADMIN, DIRECTOR, HR_ADMIN, IT_ADMIN, USER
 from app.models.department import Department
 from app.models.employee import Employee
 from app.models.organization import OrganizationAssignment, OrganizationUnit
@@ -10,9 +10,11 @@ from app.services.access_role_service import (
 
 
 def _employee_with_assignment(db_session, *, name: str, title: str, user_role: str = USER):
-    department = Department(name="IT")
-    db_session.add(department)
-    db_session.flush()
+    department = db_session.query(Department).filter(Department.name == "IT").one_or_none()
+    if department is None:
+        department = Department(name="IT")
+        db_session.add(department)
+        db_session.flush()
     employee = Employee(
         machine_employee_id=f"ROLE-{name}",
         full_name=name,
@@ -114,6 +116,24 @@ def test_chief_accountant_role_is_never_changed(db_session):
     assert role == ADMIN
     assert changed is False
     assert user.role == ADMIN
+
+
+def test_named_directors_inherit_chief_accountant_business_role(db_session):
+    for index, full_name in enumerate(("Tôn Thất Trung Kiên", "Tô Tố Vân"), start=1):
+        employee, user = _employee_with_assignment(
+            db_session,
+            name=f"director-{index}",
+            title="Director",
+            user_role=USER,
+        )
+        employee.full_name = full_name
+
+        role, reason, changed = sync_employee_access_role(db_session, employee)
+
+        assert role == DIRECTOR
+        assert "Giám đốc" in reason
+        assert changed is True
+        assert user.role == DIRECTOR
 
 
 def test_hr_employee_account_creation_uses_organization_role(client, db_session):

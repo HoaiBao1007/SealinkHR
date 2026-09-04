@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { BUSINESS_TRAVEL_REQUEST } from './TimeOffRequestIntent'
+import { AppIcon } from '../../shared/ui/AppIcon'
 import './time-off-attachment-upload.css'
 
 type ApiRequest = (path: string, init?: RequestInit) => Promise<Response>
@@ -115,7 +116,7 @@ export function TimeOffAttachmentUpload({ apiRequest, requestType, attachments, 
               <strong title={attachment.file_name}>{attachment.file_name}</strong>
               <small>{formatBytes(attachment.size_bytes)}{attachment.is_staged ? ' · Sẵn sàng gửi' : ' · Đã đính kèm'}</small>
               {attachment.is_staged && (
-                <button type="button" onClick={() => void removeStagedAttachment(attachment)} disabled={disabled || uploading} aria-label={`Gỡ ${attachment.file_name}`}>×</button>
+                <button type="button" onClick={() => void removeStagedAttachment(attachment)} disabled={disabled || uploading} aria-label={`Gỡ ${attachment.file_name}`}><AppIcon name="close" size={13} /></button>
               )}
             </li>
           ))}
@@ -125,4 +126,3 @@ export function TimeOffAttachmentUpload({ apiRequest, requestType, attachments, 
     </section>
   )
 }
-

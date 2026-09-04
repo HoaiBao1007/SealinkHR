@@ -11,7 +11,6 @@ class Employee(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     machine_employee_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    biometric_id: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True, index=True)
     full_name: Mapped[str] = mapped_column(String(150), nullable=False)
     notion_name: Mapped[str | None] = mapped_column(String(150), unique=True, nullable=True, index=True)
     department_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -26,7 +25,13 @@ class Employee(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="ACTIVE")
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    contract_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    contract_sign_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    contract_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    contract_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     resignation_period: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    last_working_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_pay_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()

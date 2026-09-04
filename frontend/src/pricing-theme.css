@@ -1,0 +1,2952 @@
+/*
+ * Sealink Pricing visual language for the HR portal.
+ *
+ * This file is intentionally presentation-only. It is loaded after every
+ * feature stylesheet so the application keeps its existing data flow,
+ * business rules and component behaviour while sharing one visual system.
+ */
+
+:root {
+  --navy: #0b3151;
+  --navy-2: #104969;
+  --blue: #0879be;
+  --blue-dark: #065e98;
+  --blue-soft: #e8f4fc;
+  --sky: #e8f4fc;
+  --green: #187a4d;
+  --green-soft: #e8f7ef;
+  --violet: #6941c6;
+  --violet-soft: #f1edff;
+  --amber: #a85e00;
+  --amber-soft: #fff3dd;
+  --red: #ba3037;
+  --red-soft: #fff0f1;
+  --ink: #14283a;
+  --ink-soft: #334e60;
+  --muted: #5b6d7b;
+  --line: #d7e2ea;
+  --surface: #ffffff;
+  --surface-muted: #f8fbfd;
+  --canvas: #f4f8fb;
+  --brand: #0879be;
+  --brand-strong: #065e98;
+  --brand-soft: #e8f4fc;
+  --button-primary-bg: #ffffff;
+  --button-primary-text: #1f2937;
+  --button-primary-border: #cbd5e1;
+  --button-primary-hover: #f1f5f9;
+  --button-primary-hover-text: #111827;
+  --button-primary-active: #e2e8f0;
+  --font-sans: "Roboto", "Segoe UI", Arial, sans-serif;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  background: var(--canvas) !important;
+  color: var(--ink);
+}
+
+body,
+#root,
+#root * {
+  font-family: var(--font-sans) !important;
+}
+
+body {
+  font-size: 14px;
+  letter-spacing: -0.005em;
+}
+
+button {
+  font-family: var(--font-sans) !important;
+  font-weight: 700;
+  letter-spacing: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color 0.22s ease,
+    background-color 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.22s ease,
+    filter 0.22s ease,
+    transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.22s ease !important;
+}
+
+.panel button > svg,
+.modal-card button > svg,
+.ui-button > svg,
+.app-action-button > svg,
+.sl-btn-action > svg,
+.icon-only-control > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+button:not(:disabled):active {
+  transform: translateY(1px) scale(0.975);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #0b3151 !important;
+  outline-offset: 2px !important;
+}
+
+::selection {
+  background: #cceafa;
+  color: var(--navy);
+}
+
+/* Application frame ------------------------------------------------------ */
+
+.sealink-app-shell {
+  background: var(--canvas) !important;
+}
+
+.sealink-sidebar {
+  background: #0879be !important;
+  border-right-color: rgb(255 255 255 / 24%) !important;
+  position: relative !important;
+  inset: auto !important;
+  z-index: auto !important;
+}
+
+.sealink-sidebar-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 180 !important;
+  width: 100vw !important;
+  min-width: 100vw !important;
+  max-width: none !important;
+  height: 100vh !important;
+  min-height: 100vh !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: rgb(2 20 34 / 48%) !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+  backdrop-filter: blur(2px);
+}
+
+@media (max-width: 900px) {
+  .sealink-app-shell > aside.sealink-sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0 !important;
+    z-index: 190 !important;
+  }
+}
+
+.sealink-rail-inner {
+  scrollbar-color: rgb(188 213 230 / 45%) transparent;
+  scrollbar-width: thin !important;
+}
+
+.sealink-rail-brand {
+  min-height: 92px;
+  padding: 22px 18px 18px !important;
+  border-bottom-color: rgb(255 255 255 / 12%) !important;
+}
+
+.sealink-rail-logo {
+  width: 196px !important;
+  min-height: 58px;
+  padding: 7px 12px !important;
+  border: 1px solid rgb(255 255 255 / 34%);
+  border-radius: 13px !important;
+  box-shadow: 0 10px 28px rgb(2 18 30 / 34%) !important;
+}
+
+.sealink-rail-logo img {
+  width: 166px !important;
+}
+
+.sealink-rail-menu {
+  padding: 19px 18px 16px !important;
+}
+
+.sealink-rail-label {
+  margin: 0 0 10px 2px !important;
+  color: #ffffff !important;
+  font-size: 11px !important;
+  letter-spacing: 0.16em !important;
+  text-shadow: none;
+}
+
+.sealink-nav-stack {
+  gap: 7px !important;
+}
+
+.sealink-nav-item,
+.sealink-settings-toggle {
+  min-height: 46px !important;
+  gap: 11px !important;
+  margin: 0 !important;
+  padding: 8px 12px !important;
+  border: 0 !important;
+  border-radius: 11px !important;
+  outline: 2px solid transparent;
+  outline-offset: -1px;
+  color: #ffffff !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none;
+  transition:
+    color 180ms ease,
+    background-color 180ms ease,
+    outline-color 180ms ease,
+    box-shadow 220ms ease,
+    transform 220ms ease !important;
+}
+
+.sealink-nav-item:hover,
+.sealink-settings-toggle:hover {
+  outline-color: #0369a1;
+  color: #0369a1 !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 22px rgb(3 105 161 / 22%) !important;
+  text-shadow: none;
+}
+
+.sealink-nav-item.is-active {
+  outline-color: #0369a1;
+  color: #0369a1 !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 24px rgb(3 105 161 / 24%) !important;
+  text-shadow: none;
+}
+
+.sealink-nav-item.is-nested {
+  min-height: 40px !important;
+  padding-block: 6px !important;
+}
+
+.sealink-nav-icon {
+  width: 30px !important;
+  height: 30px !important;
+  border: 1px solid rgb(255 255 255 / 18%) !important;
+  border-radius: 9px !important;
+  color: #ffffff !important;
+  background: rgb(255 255 255 / 12%) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%);
+  transition:
+    transform 0.35s cubic-bezier(0.2, 0.9, 0.2, 1.25),
+    background-color 0.28s ease,
+    border-color 0.28s ease,
+    color 0.28s ease,
+    box-shadow 0.3s ease !important;
+}
+
+.sealink-nav-item:hover .sealink-nav-icon,
+.sealink-settings-toggle:hover > span:first-of-type {
+  border-color: #7dd3fc !important;
+  color: #0369a1 !important;
+  background: linear-gradient(145deg, #ffffff, #e0f2fe) !important;
+  box-shadow: inset 0 1px 0 #ffffff, 0 7px 18px rgb(3 105 161 / 20%);
+  transform: translateX(3px) scale(1.06);
+}
+
+.sealink-nav-item.is-active .sealink-nav-icon,
+.sealink-settings-toggle.is-active > span:first-of-type {
+  border-color: #9fddfa !important;
+  color: #0369a1 !important;
+  background: linear-gradient(145deg, #ffffff, #dff4ff) !important;
+  box-shadow: inset 0 1px 0 #fff, 0 7px 18px rgb(6 27 43 / 17%), 0 0 0 3px rgb(85 188 230 / 14%);
+}
+
+.sealink-nav-item:hover .sealink-nav-icon svg,
+.sealink-nav-item.is-active .sealink-nav-icon svg,
+.sealink-settings-toggle:hover > span:first-of-type svg,
+.sealink-settings-toggle.is-active > span:first-of-type svg {
+  color: #0369a1 !important;
+}
+
+.sealink-nav-label {
+  color: inherit !important;
+  font-size: 12px !important;
+  font-weight: 650 !important;
+}
+
+.sealink-settings-toggle.is-active {
+  outline-color: #0369a1;
+  color: #0369a1 !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 24px rgb(3 105 161 / 24%) !important;
+  text-shadow: none;
+}
+
+.sealink-settings-toggle > span:nth-of-type(2) {
+  color: inherit !important;
+}
+
+.sealink-settings-children {
+  margin-left: 31px !important;
+  border-left-color: rgb(255 255 255 / 24%) !important;
+}
+
+.sealink-nav-group {
+  gap: 0 !important;
+  transition: gap 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sealink-nav-group.is-open {
+  gap: 2px !important;
+}
+
+.sealink-nav-group-children {
+  max-height: 0;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-7px);
+  transform-origin: top;
+  transition:
+    max-height 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease,
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 300ms;
+}
+
+.sealink-nav-group-children.is-open {
+  max-height: 260px;
+  margin-top: 3px !important;
+  margin-bottom: 5px !important;
+  padding-top: 3px !important;
+  padding-bottom: 3px !important;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sealink-nav-group,
+  .sealink-nav-group-children {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.sealink-rail-resource > div:last-child {
+  border-color: rgb(255 255 255 / 24%) !important;
+  border-radius: 13px !important;
+  background: rgb(2 20 34 / 10%) !important;
+}
+
+.sealink-rail-toggle {
+  width: 40px !important;
+  height: 40px !important;
+  top: 76px !important;
+  border: 1px solid #b9d5e5 !important;
+  background: #ffffff !important;
+  color: var(--navy) !important;
+  box-shadow: 0 4px 12px rgb(6 27 43 / 20%) !important;
+}
+
+.sealink-rail-toggle:hover {
+  border-color: var(--blue) !important;
+  background: #ffffff !important;
+  color: var(--blue) !important;
+  box-shadow: 0 7px 18px rgb(8 127 207 / 17%) !important;
+}
+
+.sealink-main-column {
+  background: var(--canvas);
+}
+
+/* App.css still contains legacy catch-all selectors for every <main> and any
+   class containing "content". Keep the shared shell as the single scroll
+   container so feature pages do not inherit a second 100vh scrollbar. */
+.sealink-main-column > main.sealink-content {
+  flex: 1 0 auto !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 24px !important;
+}
+
+.sealink-topbar {
+  min-height: 64px !important;
+  padding: 10px 20px !important;
+  border-bottom-color: var(--line) !important;
+  background: rgb(255 255 255 / 96%) !important;
+  box-shadow: 0 1px 0 rgb(11 49 81 / 2%);
+}
+
+.sealink-topbar-title > p {
+  color: var(--blue) !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.12em !important;
+}
+
+.sealink-topbar-title > h1 {
+  color: var(--ink) !important;
+  font-size: 18px !important;
+  font-weight: 750 !important;
+}
+
+.sealink-topbar-actions > .hidden {
+  border-color: var(--line) !important;
+  background: #f3f7f9 !important;
+  color: var(--muted) !important;
+}
+
+.sealink-user-menu > summary {
+  min-height: 44px;
+  border-color: var(--line) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 7px rgb(11 49 81 / 8%) !important;
+}
+
+.sealink-user-menu > summary > span:first-of-type {
+  background: var(--sky) !important;
+  color: var(--blue) !important;
+}
+
+.sealink-user-menu[open] > summary {
+  border-color: #9bc9e1 !important;
+  box-shadow: 0 0 0 3px rgb(8 121 190 / 9%) !important;
+}
+
+.sealink-user-menu > div {
+  border-color: #bfd5e0 !important;
+  border-radius: 14px !important;
+  box-shadow: 0 20px 50px -20px rgb(15 23 42 / 32%) !important;
+}
+
+.sealink-page-context {
+  min-height: 48px;
+  padding: 9px 24px !important;
+  border-bottom-color: var(--line) !important;
+  background: #ffffff !important;
+}
+
+.sealink-page-context > p {
+  color: var(--muted) !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+
+.sealink-content {
+  width: 100%;
+  padding: 24px 24px 42px !important;
+}
+
+.sealink-content > * {
+  animation: sealink-element-in 0.34s cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
+.sealink-statusbar {
+  min-height: 42px;
+  padding: 9px 24px !important;
+  border-top-color: var(--line) !important;
+  background: rgb(255 255 255 / 96%) !important;
+}
+
+.sealink-statusbar > div {
+  font-size: 11px !important;
+}
+
+/* Surfaces --------------------------------------------------------------- */
+
+.panel {
+  gap: 18px !important;
+}
+
+.grid-two {
+  gap: 18px !important;
+}
+
+.card,
+.ui-card,
+.panel > section,
+.import-inspect-box,
+.import-commit-box,
+.import-column-filter-box,
+.rounded-\[28px\].border.bg-white {
+  border-color: var(--line) !important;
+  border-radius: 14px !important;
+  background: var(--surface) !important;
+  box-shadow: 0 5px 16px rgb(21 52 70 / 5%) !important;
+}
+
+.card {
+  padding: 18px !important;
+}
+
+.card:hover,
+.ui-card:hover {
+  border-color: #bad7e7 !important;
+  box-shadow: 0 9px 22px rgb(21 52 70 / 8%) !important;
+}
+
+.card h2,
+.card h3,
+.panel h2,
+.panel h3,
+.modal-card h2,
+.modal-card h3 {
+  color: var(--navy) !important;
+  letter-spacing: -0.02em;
+}
+
+.card h2,
+.panel h2 {
+  font-size: 17px !important;
+}
+
+.muted,
+.card p,
+.panel p,
+.modal-card p {
+  color: var(--muted);
+}
+
+.kpi-grid {
+  gap: 14px !important;
+}
+
+.kpi-card,
+[class*="metric-card"] {
+  border-color: var(--line) !important;
+  border-radius: 14px !important;
+  background: #ffffff !important;
+  box-shadow: 0 5px 16px rgb(21 52 70 / 4%) !important;
+}
+
+.kpi-card:hover,
+[class*="metric-card"]:hover {
+  border-color: #bad7e7 !important;
+  box-shadow: 0 9px 22px rgb(21 52 70 / 8%) !important;
+  transform: translateY(-1px);
+}
+
+.kpi-card h3,
+[class*="metric-card"] h3 {
+  color: var(--muted) !important;
+  font-size: 11px !important;
+  font-weight: 750 !important;
+}
+
+.kpi-card p,
+[class*="metric-value"] {
+  color: var(--navy) !important;
+  letter-spacing: -0.035em;
+}
+
+/* Controls --------------------------------------------------------------- */
+
+.panel label,
+.modal-card label,
+.ui-card label,
+.sealink-content label {
+  color: var(--navy);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.panel :is(input, select, textarea),
+.modal-card :is(input, select, textarea),
+.ui-card :is(input, select, textarea),
+.sealink-content :is(input, select, textarea) {
+  border-color: var(--line);
+  border-radius: 9px;
+  background: #ffffff;
+  color: var(--ink);
+}
+
+.panel :is(input, select):not([type="checkbox"]):not([type="radio"]),
+.modal-card :is(input, select):not([type="checkbox"]):not([type="radio"]),
+.ui-card :is(input, select):not([type="checkbox"]):not([type="radio"]) {
+  min-height: 40px;
+}
+
+.panel :is(input, select, textarea):focus,
+.modal-card :is(input, select, textarea):focus,
+.ui-card :is(input, select, textarea):focus,
+.sealink-content :is(input, select, textarea):focus {
+  outline: 0 !important;
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 3px var(--sky) !important;
+}
+
+.panel input::placeholder,
+.modal-card input::placeholder,
+.panel textarea::placeholder,
+.modal-card textarea::placeholder {
+  color: #8293a0;
+}
+
+.panel button,
+.modal-card button,
+.ui-button,
+.app-action-button,
+.sl-btn-action {
+  min-height: 40px;
+  border: 1px solid var(--button-primary-border);
+  border-radius: 10px;
+  background: var(--button-primary-bg);
+  color: var(--button-primary-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.15;
+  box-shadow: 0 4px 12px -9px rgb(15 23 42 / 42%);
+}
+
+.panel button:hover:not(:disabled),
+.modal-card button:hover:not(:disabled),
+.ui-button:hover:not(:disabled),
+.app-action-button:hover:not(:disabled),
+.sl-btn-action:hover:not(:disabled) {
+  background: var(--button-primary-hover);
+  color: var(--button-primary-hover-text);
+  border-color: #94a3b8;
+  box-shadow: 0 8px 18px -11px rgb(15 23 42 / 48%);
+}
+
+.panel button:disabled,
+.modal-card button:disabled,
+.ui-button:disabled,
+.app-action-button:disabled,
+.sl-btn-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none !important;
+}
+
+.panel button.ghost,
+.modal-card button.ghost,
+.ui-button-secondary,
+.app-download-button,
+button[class*="download"],
+.dashboard-kpi-action,
+.holiday-toolbar-control,
+.icon-only-control {
+  border-color: #b9d4e5 !important;
+  background: #ffffff !important;
+  color: var(--blue-dark) !important;
+  box-shadow: 0 2px 8px rgb(11 49 81 / 4%) !important;
+}
+
+.panel button.ghost:hover:not(:disabled),
+.modal-card button.ghost:hover:not(:disabled),
+.ui-button-secondary:hover:not(:disabled),
+.app-download-button:hover:not(:disabled),
+button[class*="download"]:hover:not(:disabled),
+.dashboard-kpi-action:hover:not(:disabled),
+.holiday-toolbar-control:hover:not(:disabled),
+.icon-only-control:hover:not(:disabled) {
+  border-color: var(--blue) !important;
+  background: var(--blue-soft) !important;
+  color: var(--blue-dark) !important;
+  box-shadow: 0 7px 16px rgb(23 56 76 / 8%) !important;
+}
+
+.app-segmented-tabs,
+[role="tablist"] {
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #edf3f6;
+}
+
+.app-segmented-tabs button,
+[role="tablist"] button {
+  min-height: 34px !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+  box-shadow: none !important;
+}
+
+.app-segmented-tabs button.is-active,
+.app-segmented-tabs button.active,
+[role="tablist"] button[aria-selected="true"] {
+  background: #ffffff !important;
+  color: var(--navy) !important;
+  box-shadow: 0 2px 7px rgb(11 49 81 / 12%) !important;
+}
+
+.app-action-toolbar,
+.salary-grid-toolbar,
+.holiday-toolbar-actions {
+  border-color: var(--line) !important;
+  border-radius: 12px !important;
+  background: #f8fbfd !important;
+}
+
+/* Tables ----------------------------------------------------------------- */
+
+.table-wrap,
+.ui-table-wrap,
+.employee-directory-table-wrap,
+[class*="table-wrap"] {
+  border-color: var(--line) !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.panel table,
+.ui-table,
+.sealink-content table {
+  color: var(--ink);
+  background: #ffffff;
+}
+
+.panel th,
+.ui-table th,
+.sealink-content th {
+  padding: 11px 13px;
+  border-color: var(--line) !important;
+  background: #f8fafb;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.panel td,
+.ui-table td,
+.sealink-content td {
+  padding: 12px 13px;
+  border-color: #edf1f3 !important;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.panel tbody tr:hover,
+.ui-table tbody tr:hover,
+.sealink-content tbody tr:hover {
+  background: #fbfdfe !important;
+}
+
+.panel thead,
+.sealink-content thead {
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* Status, feedback and empty states ------------------------------------- */
+
+.kpi-pill,
+.status-pill,
+.status-badge,
+.badge,
+[class*="status-chip"] {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid #c9e3f2;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.ui-state,
+.empty-state,
+.empty-placeholder {
+  border-color: #c5d9e5 !important;
+  border-radius: 11px !important;
+  background: #f8fbfd !important;
+  color: var(--muted) !important;
+}
+
+.notice,
+.import-loading-banner,
+[role="alert"] {
+  border-radius: 10px !important;
+}
+
+/* Dialogs ---------------------------------------------------------------- */
+
+.app-modal-overlay,
+.ui-modal-backdrop,
+.modal-backdrop,
+.department-modal-backdrop,
+.other-income-evidence-backdrop,
+.fixed.inset-0[class*="bg-black"],
+.fixed.inset-0[class*="backdrop"] {
+  background: rgb(5 24 38 / 58%) !important;
+  backdrop-filter: blur(3px) !important;
+  -webkit-backdrop-filter: blur(3px) !important;
+}
+
+.modal-card,
+.ui-confirm-dialog,
+.department-modal-card,
+.other-income-evidence-modal {
+  border: 1px solid #bcd6e4 !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  box-shadow: 0 28px 90px rgb(4 27 43 / 44%) !important;
+}
+
+.modal-card > header,
+.department-modal-card > header,
+.other-income-evidence-modal__header {
+  border-bottom-color: var(--line) !important;
+}
+
+.modal-card > footer,
+.department-modal-card > footer,
+.other-income-evidence-modal__footer {
+  border-top-color: var(--line) !important;
+  background: #f8fbfd !important;
+}
+
+/* Preserve semantic destructive and close actions after generic buttons. */
+.app-delete-button,
+.sl-btn-delete-csv,
+button[aria-label*="Xóa"],
+button[class*="delete"] {
+  border-color: #f2c8cb !important;
+  background: var(--red-soft) !important;
+  color: var(--red) !important;
+  box-shadow: none !important;
+}
+
+.app-delete-button:hover:not(:disabled),
+.sl-btn-delete-csv:hover:not(:disabled),
+button[aria-label*="Xóa"]:hover:not(:disabled),
+button[class*="delete"]:hover:not(:disabled) {
+  border-color: #e69da3 !important;
+  background: #ffe3e5 !important;
+  color: #9e252d !important;
+}
+
+#root button.app-close-button,
+#root button.department-modal-icon-button.app-close-button {
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 !important;
+  border: 1px solid #b91c1c !important;
+  border-radius: 50% !important;
+  background: radial-gradient(circle at 30% 26%, #fb7185 0%, #ef4444 39%, #dc2626 68%, #b91c1c 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 7px 16px rgb(185 28 28 / 20%) !important;
+}
+
+#root button.app-close-button--compact {
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+}
+
+/* Login ------------------------------------------------------------------ */
+
+.sealink-login-shell {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  padding: 0;
+  overflow: hidden !important;
+  background: #071f32 !important;
+}
+
+.sealink-login-visual {
+  position: relative;
+  width: 60%;
+  height: 100vh;
+  flex: 0 0 60%;
+  overflow: hidden;
+  background: linear-gradient(145deg, #071f32 0%, #0d2a40 48%, #164768 100%);
+}
+
+.sealink-login-visual-copy {
+  position: absolute;
+  z-index: 4;
+  top: 30px;
+  left: 32px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.sealink-login-visual-copy h1 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(25px, 2.4vw, 38px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.sealink-login-visual-copy p {
+  margin: 7px 0 0;
+  color: #68c8ef;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sealink-login-background,
+.sealink-login-grid,
+.sealink-login-orbit,
+.sealink-login-glow {
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+}
+
+.sealink-login-background {
+  inset: 0;
+  overflow: hidden;
+}
+
+.sealink-login-grid {
+  inset: 0;
+  opacity: 0.42;
+  background-image:
+    linear-gradient(rgb(8 121 190 / 8%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(8 121 190 / 8%) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(circle at center, #000 18%, transparent 78%);
+}
+
+.sealink-login-orbit {
+  width: min(78vw, 900px);
+  aspect-ratio: 1;
+  border: 74px solid rgb(85 181 226 / 8%);
+  border-radius: 50%;
+}
+
+.sealink-login-orbit-one {
+  top: -48%;
+  right: -24%;
+}
+
+.sealink-login-orbit-two {
+  bottom: -56%;
+  left: -28%;
+  width: min(70vw, 760px);
+  border-width: 58px;
+  opacity: 0.7;
+}
+
+.sealink-login-glow {
+  inset: 12% 17%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(255 255 255 / 86%), transparent 67%);
+  filter: blur(20px);
+}
+
+.sealink-login-panel {
+  position: relative;
+  width: 40%;
+  height: 100vh;
+  min-width: 420px;
+  flex: 1 1 40%;
+  display: grid;
+  place-items: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 34px 24px;
+  background:
+    radial-gradient(circle at 88% 10%, rgb(104 200 237 / 23%), transparent 30%),
+    linear-gradient(145deg, #e2f4fc 0%, #f9fcfe 52%, #d9eff9 100%) !important;
+  box-shadow: -22px 0 60px rgb(3 23 37 / 16%);
+}
+
+.sealink-login-card {
+  position: relative;
+  z-index: 2;
+  width: min(430px, 100%);
+  display: grid;
+  gap: 25px;
+  padding: 28px 32px 0;
+  border: 1px solid #78c2e6;
+  border-radius: 18px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow:
+    0 24px 70px rgb(10 76 111 / 16%),
+    inset 0 0 0 3px rgb(255 255 255 / 86%);
+  backdrop-filter: blur(18px);
+}
+
+.sealink-login-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.sealink-login-logo {
+  width: 62px;
+  height: 54px;
+  flex: 0 0 62px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 7px;
+  border: 1px solid #c4deeb;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #ffffff, #f3f9fc);
+  box-shadow: 0 8px 20px rgb(11 49 81 / 8%);
+}
+
+.sealink-login-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sealink-login-heading {
+  display: grid;
+  gap: 5px;
+}
+
+.sealink-login-heading > p {
+  margin: 0;
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+}
+
+.sealink-login-heading > h1 {
+  margin: 0;
+  color: var(--navy) !important;
+  font-size: 30px !important;
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.sealink-login-heading > span {
+  color: #526979;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.sealink-login-card .login-form {
+  display: grid;
+  gap: 17px;
+}
+
+.sealink-login-card form input {
+  min-height: 42px;
+  border-color: var(--line) !important;
+  border-radius: 10px !important;
+  background: linear-gradient(180deg, #ffffff, #f8fbfd) !important;
+  color: var(--navy) !important;
+  font-size: 12px !important;
+  font-weight: 600;
+}
+
+.sealink-login-card form input:focus {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 3px var(--sky) !important;
+}
+
+.sealink-login-password {
+  position: relative !important;
+  display: grid !important;
+  align-items: center !important;
+}
+
+.sealink-login-password > input {
+  grid-area: 1 / 1 !important;
+  width: 100% !important;
+  padding-right: 48px !important;
+}
+
+.sealink-login-card .sealink-login-password-toggle {
+  position: static !important;
+  grid-area: 1 / 1 !important;
+  align-self: center !important;
+  justify-self: end !important;
+  z-index: 2;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  color: #607d8f !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  margin: 0 7px 0 0 !important;
+  transform: none !important;
+}
+
+.sealink-login-card .sealink-login-password-toggle:hover:not(:disabled) {
+  color: var(--blue) !important;
+  background: var(--blue-soft) !important;
+  transform: scale(1.04) !important;
+}
+
+.sealink-login-card form > button[type="submit"] {
+  min-height: 42px;
+  margin-top: 4px !important;
+  border-radius: 10px !important;
+  border-color: var(--button-primary-border) !important;
+  background: var(--button-primary-bg) !important;
+  color: var(--button-primary-text) !important;
+  box-shadow: 0 5px 14px -10px rgb(15 23 42 / 48%) !important;
+}
+
+.sealink-login-card form > button[type="submit"]:hover:not(:disabled) {
+  border-color: #94a3b8 !important;
+  background: var(--button-primary-hover) !important;
+  color: var(--button-primary-hover-text) !important;
+  box-shadow: 0 9px 20px -12px rgb(15 23 42 / 52%) !important;
+}
+
+.sealink-login-card > .pt-6 {
+  margin-inline: -32px;
+  padding: 18px 32px 19px !important;
+  border-top-color: #dce8ee !important;
+  border-radius: 0 0 18px 18px;
+  background: #f8fbfd;
+}
+
+@media (max-width: 900px) {
+  .sealink-login-visual { display: none; }
+  .sealink-login-panel {
+    width: 100%;
+    min-width: 0;
+    flex-basis: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .sealink-login-panel { padding: 18px 12px; }
+  .sealink-login-card {
+    width: min(100%, 430px);
+    gap: 21px;
+    padding: 24px 22px 0;
+  }
+  .sealink-login-card > .pt-6 {
+    margin-inline: -22px;
+    padding-inline: 22px !important;
+  }
+  .sealink-login-brand-copy span { display: none; }
+  .sealink-login-heading > h1 { font-size: 27px !important; }
+}
+
+/* Scrollbars ------------------------------------------------------------- */
+
+.sealink-main-column,
+.modal-card,
+.table-wrap,
+[class*="overflow-auto"],
+[class*="overflow-y-auto"] {
+  scrollbar-color: #a9c2d1 transparent;
+  scrollbar-width: thin;
+}
+
+.sealink-main-column::-webkit-scrollbar,
+.modal-card::-webkit-scrollbar,
+.table-wrap::-webkit-scrollbar,
+[class*="overflow-auto"]::-webkit-scrollbar,
+[class*="overflow-y-auto"]::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.sealink-main-column::-webkit-scrollbar-thumb,
+.modal-card::-webkit-scrollbar-thumb,
+.table-wrap::-webkit-scrollbar-thumb,
+[class*="overflow-auto"]::-webkit-scrollbar-thumb,
+[class*="overflow-y-auto"]::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #a9c2d1;
+  background-clip: padding-box;
+}
+
+@keyframes sealink-element-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 920px) {
+  .sealink-content {
+    padding: 18px 16px 34px !important;
+  }
+
+  .sealink-main-column > main.sealink-content {
+    padding: 18px 16px 34px !important;
+  }
+
+  .sealink-topbar,
+  .sealink-page-context,
+  .sealink-statusbar {
+    padding-inline: 16px !important;
+  }
+
+  .grid-two {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .card {
+    padding: 15px !important;
+  }
+
+  .sealink-topbar {
+    align-items: flex-start !important;
+  }
+
+  .sealink-topbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .modal-card,
+  .department-modal-card,
+  .other-income-evidence-modal {
+    border-radius: 15px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Shared Pricing-style date picker --------------------------------------- */
+
+.branded-date-picker {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.panel label > .branded-date-picker,
+.modal-card label > .branded-date-picker {
+  margin-top: 8px;
+}
+
+.modal-card .employee-detail-grid label > .branded-date-picker {
+  margin-top: 6px;
+}
+
+.sl-input-wrapper > .branded-date-picker {
+  width: auto;
+  flex: 1 1 auto;
+}
+
+.branded-date-picker.branded-date-inline {
+  width: 168px;
+  flex: 0 0 168px;
+}
+
+.branded-date-native {
+  position: absolute !important;
+  left: 1px !important;
+  bottom: 1px !important;
+  width: 1px !important;
+  min-width: 1px !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+#root .branded-date-trigger,
+.ui-modal-backdrop .branded-date-trigger {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 8px 10px 8px 12px !important;
+  border: 1px solid #b8d1df !important;
+  border-radius: 10px !important;
+  color: #718693 !important;
+  background: #ffffff !important;
+  background-image: none !important;
+  box-shadow: 0 2px 7px rgb(23 56 76 / 4%) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  text-align: left !important;
+}
+
+#root .branded-date-trigger.has-value,
+.ui-modal-backdrop .branded-date-trigger.has-value { color: var(--navy) !important; }
+
+#root .branded-date-trigger:hover:not(:disabled),
+.ui-modal-backdrop .branded-date-trigger:hover:not(:disabled) {
+  border-color: #71b7db !important;
+  color: var(--navy) !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 12px rgb(22 76 104 / 8%) !important;
+  transform: translateY(-1px) !important;
+}
+
+#root .branded-date-trigger:focus-visible,
+#root .branded-date-trigger[aria-expanded="true"],
+.ui-modal-backdrop .branded-date-trigger:focus-visible,
+.ui-modal-backdrop .branded-date-trigger[aria-expanded="true"] {
+  border-color: var(--blue) !important;
+  outline: 0 !important;
+  box-shadow: 0 0 0 3px rgb(8 121 190 / 10%), 0 5px 14px rgb(22 76 104 / 8%) !important;
+}
+
+.branded-date-picker.is-disabled { opacity: 1; }
+
+#root .branded-date-picker.is-disabled .branded-date-trigger,
+.ui-modal-backdrop .branded-date-picker.is-disabled .branded-date-trigger {
+  cursor: not-allowed !important;
+  border-color: #d7e2ea !important;
+  color: #94a3b8 !important;
+  background: #ffffff !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.branded-date-icon {
+  width: 21px;
+  height: 21px;
+  flex: 0 0 21px;
+  overflow: visible;
+  color: var(--blue);
+  stroke: currentColor;
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-origin: center;
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.2s ease;
+}
+
+.branded-date-icon-days { stroke-width: 2.6; }
+#root .branded-date-trigger:hover .branded-date-icon,
+.ui-modal-backdrop .branded-date-trigger:hover .branded-date-icon { transform: translateY(-1px) rotate(-2deg); }
+
+.branded-date-trigger:hover .branded-date-icon-rings,
+.branded-date-icon.is-active .branded-date-icon-rings {
+  animation: branded-calendar-ring-bounce 0.62s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: center;
+}
+
+.branded-date-icon.is-active .branded-date-icon-days { animation: branded-calendar-date-pop 0.72s ease both; }
+
+@keyframes branded-calendar-ring-bounce {
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(-1.7px); }
+}
+
+@keyframes branded-calendar-date-pop {
+  0% { opacity: 0.25; stroke-dasharray: 0 30; }
+  100% { opacity: 1; stroke-dasharray: 30 0; }
+}
+
+.branded-date-popover {
+  position: fixed;
+  z-index: 10000;
+  overflow: hidden;
+  border: 1px solid #b6cfdb;
+  border-radius: 15px;
+  color: var(--ink);
+  background: #ffffff;
+  box-shadow: 0 20px 55px rgb(8 47 75 / 22%);
+  animation: branded-calendar-in 0.18s ease-out both;
+  font-family: var(--font-sans) !important;
+}
+
+@keyframes branded-calendar-in {
+  from { opacity: 0; transform: translateY(-5px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.branded-date-popover > header {
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-bottom: 1px solid #d8e6ed;
+  background: linear-gradient(135deg, #eaf6fc, #f8fcfe);
+}
+
+.branded-date-popover > header strong {
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.branded-date-popover > header button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #bfd7e3;
+  border-radius: 9px;
+  color: var(--blue-dark);
+  background: #ffffff;
+  box-shadow: none;
+  font: 500 24px/1 var(--font-sans);
+}
+
+.branded-date-popover > header button:hover:not(:disabled) {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  transform: translateY(-1px);
+}
+
+.branded-date-weekdays,
+.branded-date-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.branded-date-weekdays {
+  padding: 10px 10px 4px;
+  color: #6d818d;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.branded-date-days { gap: 3px; padding: 4px 10px 10px; }
+
+.branded-date-days button {
+  position: relative;
+  min-width: 0;
+  height: 35px;
+  min-height: 35px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  color: #294656;
+  background: transparent;
+  box-shadow: none;
+  font: 750 11px/1 var(--font-sans);
+}
+
+.branded-date-days button:hover:not(:disabled) {
+  color: var(--blue-dark);
+  background: #e8f5fb;
+  transform: translateY(-1px);
+}
+
+.branded-date-days button:focus-visible { outline: 0 !important; box-shadow: 0 0 0 2px var(--blue) !important; }
+.branded-date-days button.outside { color: #a9b7bf; }
+
+.branded-date-days button.today:not(.selected)::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--blue);
+  transform: translateX(-50%);
+}
+
+.branded-date-days button.selected {
+  color: #ffffff;
+  background: linear-gradient(145deg, var(--blue), var(--blue-dark));
+  box-shadow: 0 5px 12px rgb(8 121 190 / 21%);
+}
+
+.branded-date-days button:disabled { color: #cad3d8; cursor: not-allowed; text-decoration: line-through; }
+
+.branded-date-popover > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border-top: 1px solid #dce8ee;
+  background: #f8fbfd;
+}
+
+.branded-date-popover > footer button {
+  min-height: 34px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  box-shadow: none;
+  font: 800 10px/1 var(--font-sans);
+}
+
+.branded-date-clear { border: 1px solid transparent; color: #687d89; background: transparent; }
+.branded-date-today { border: 1px solid #9cc9df; color: var(--blue-dark); background: #eaf6fc; }
+
+.branded-date-popover > footer button:hover:not(:disabled) {
+  border-color: var(--blue);
+  color: var(--blue-dark);
+  background: #dff2fc;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 640px) {
+  .branded-date-popover { max-width: calc(100vw - 24px); }
+}
+
+/* Portal dialogs and segmented controls -----------------------------------
+   React portals are mounted beside #root, so they need the same Pricing UI
+   primitives explicitly instead of relying on selectors scoped to #root. */
+
+body :is(button, input, select, textarea) {
+  font-family: var(--font-sans) !important;
+}
+
+#root main .app-segmented-tabs > .app-segmented-tab {
+  min-height: 36px !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: #607783 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+#root main .app-segmented-tabs > .app-segmented-tab:hover:not(:disabled) {
+  border-color: #d0e0e8 !important;
+  background: #e4eef4 !important;
+  color: var(--blue-dark) !important;
+  transform: none !important;
+}
+
+#root main .app-segmented-tabs > .app-segmented-tab[aria-selected="true"] {
+  border-color: #8fc4de !important;
+  background: #ffffff !important;
+  color: var(--blue-dark) !important;
+  box-shadow: 0 3px 9px rgb(11 49 81 / 14%) !important;
+}
+
+.department-modal-backdrop *,
+.other-income-evidence-backdrop * {
+  font-family: var(--font-sans) !important;
+}
+
+.department-modal-surface,
+.other-income-evidence-modal {
+  box-sizing: border-box;
+  border: 1px solid #bcd6e4 !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  color: var(--ink) !important;
+  box-shadow: 0 28px 90px rgb(4 27 43 / 44%) !important;
+}
+
+.department-modal-surface :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea),
+.other-income-evidence-modal :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea) {
+  min-height: 40px;
+  border: 1px solid #b9cedb !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  color: var(--ink) !important;
+  box-shadow: 0 2px 7px rgb(11 49 81 / 5%) !important;
+  outline: 0 !important;
+}
+
+.department-modal-surface :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea):focus,
+.other-income-evidence-modal :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea):focus {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 3px rgb(8 121 190 / 14%) !important;
+}
+
+.department-modal-surface :is(input, select, textarea):disabled,
+.other-income-evidence-modal :is(input, select, textarea):disabled {
+  border-color: #dbe5eb !important;
+  background: #f3f7fa !important;
+  color: #7d8e9a !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+.department-bonus-modal {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.department-bonus-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #ffffff, #f8fbfd);
+}
+
+.department-modal-eyebrow {
+  margin: 0 0 5px;
+  color: var(--blue) !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.department-bonus-modal > .mb-4 {
+  margin: 0 !important;
+  padding: 20px 24px 18px;
+}
+
+.department-bonus-rules {
+  margin: 0 24px;
+  padding: 16px !important;
+  border-color: #cfe0e9 !important;
+  background: #f6fafc !important;
+}
+
+.department-bonus-rules input:not([type="checkbox"]):not([type="radio"]) {
+  min-height: 34px !important;
+  height: 34px;
+}
+
+.department-bonus-add-row {
+  min-height: 32px !important;
+  padding: 6px 11px !important;
+  border: 1px solid #a9d0e3 !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: var(--blue-dark) !important;
+  box-shadow: 0 2px 7px rgb(11 49 81 / 6%) !important;
+}
+
+.department-bonus-add-row:hover:not(:disabled) {
+  border-color: var(--blue) !important;
+  background: var(--blue-soft) !important;
+}
+
+body button.department-bonus-delete-row {
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  border: 1px solid #f2c8cb !important;
+  border-radius: 8px !important;
+  background: var(--red-soft) !important;
+  color: var(--red) !important;
+  box-shadow: none !important;
+}
+
+.department-bonus-modal__footer {
+  padding: 16px 24px 20px;
+  border-top: 1px solid var(--line);
+  background: #f8fbfd;
+}
+
+body button.department-modal-button,
+.other-income-evidence-modal button.app-modal-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 7px !important;
+  min-width: 96px !important;
+  min-height: 40px !important;
+  padding: 8px 16px !important;
+  border: 1px solid #b9d4e5 !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  color: var(--blue-dark) !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  box-shadow: 0 2px 8px rgb(11 49 81 / 5%) !important;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease !important;
+}
+
+body button.department-modal-button:hover:not(:disabled),
+.other-income-evidence-modal button.app-modal-button--secondary:hover:not(:disabled) {
+  border-color: var(--blue) !important;
+  background: var(--blue-soft) !important;
+  box-shadow: 0 7px 16px rgb(23 56 76 / 10%) !important;
+  transform: translateY(-1px);
+}
+
+body button.department-modal-button-primary,
+.other-income-evidence-modal button.app-modal-button--primary {
+  border-color: var(--button-primary-border) !important;
+  background: var(--button-primary-bg) !important;
+  color: var(--button-primary-text) !important;
+  box-shadow: 0 4px 12px -9px rgb(15 23 42 / 42%) !important;
+}
+
+body button.department-modal-button-primary:hover:not(:disabled),
+.other-income-evidence-modal button.app-modal-button--primary:hover:not(:disabled) {
+  border-color: #94a3b8 !important;
+  background: var(--button-primary-hover) !important;
+  color: var(--button-primary-hover-text) !important;
+  box-shadow: 0 8px 18px -11px rgb(15 23 42 / 48%) !important;
+  transform: translateY(-1px);
+}
+
+body button.department-modal-icon-button.app-close-button,
+.other-income-evidence-modal button.app-close-button {
+  display: grid !important;
+  place-items: center !important;
+  flex: 0 0 36px !important;
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 !important;
+  border: 1px solid #e62f3d !important;
+  border-radius: 50% !important;
+  background: linear-gradient(145deg, #ff4d58, #d91f2d) !important;
+  color: #ffffff !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  box-shadow: 0 7px 16px rgb(185 28 28 / 20%) !important;
+}
+
+.other-income-evidence-modal__header {
+  background: linear-gradient(180deg, #ffffff, #f8fbfd) !important;
+}
+
+.other-income-evidence-modal__heading > p:first-child {
+  color: var(--blue) !important;
+}
+
+.other-income-evidence-summary {
+  border-color: #cfe0e9 !important;
+  background: #f8fbfd !important;
+  box-shadow: 0 3px 10px rgb(11 49 81 / 5%);
+}
+
+.other-income-evidence-summary--amount {
+  border-color: #9ed8ee !important;
+  background: #eef9fd !important;
+}
+
+.other-income-evidence-upload {
+  border-color: #a9cfdf !important;
+  background: #f5fafc !important;
+}
+
+.other-income-evidence-upload:hover {
+  border-color: var(--blue) !important;
+  background: #eef8fc !important;
+}
+
+.other-income-evidence-file-input {
+  min-height: auto !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.other-income-evidence-file-input::file-selector-button {
+  margin-right: 12px;
+  padding: 8px 13px;
+  border: 1px solid #b9d4e5;
+  border-radius: 9px;
+  background: #ffffff;
+  color: var(--blue-dark);
+  font: 800 12px/1.2 var(--font-sans);
+  cursor: pointer;
+}
+
+.other-income-evidence-file-input:hover::file-selector-button {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.other-income-evidence-modal .app-modal-button > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+}
+
+@media (max-width: 640px) {
+  .department-bonus-modal__header,
+  .department-bonus-modal > .mb-4,
+  .department-bonus-modal__footer {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .department-bonus-rules {
+    margin-right: 16px;
+    margin-left: 16px;
+  }
+}
+
+/* Commission wallet alignment ------------------------------------------- */
+
+.sealink-login-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #334155;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sealink-login-remember input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #0ea5e9;
+  cursor: pointer;
+}
+
+.commission-funnel-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.commission-funnel-heading {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.commission-funnel-actions {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+}
+
+#root main .commission-funnel-actions > button {
+  min-height: 40px !important;
+  height: 40px !important;
+  margin: 0 !important;
+  padding: 8px 14px !important;
+  white-space: nowrap;
+}
+
+.commission-held-jobs-card {
+  overflow: hidden;
+}
+
+/* Keep the commission queue title and controls on the page canvas instead of
+   wrapping the whole workflow in a second card frame. Individual JOB cards
+   remain bordered so each record is still easy to scan. */
+.commission-funnel-panel,
+.commission-funnel-panel:hover {
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.commission-held-jobs-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.commission-held-jobs-heading {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.commission-held-jobs-section > .commission-tablist,
+.commission-held-jobs-section > .commission-held-jobs-table-wrap {
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.commission-held-jobs-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.commission-held-jobs-summary-row > b {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.commission-held-job-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr));
+  gap: 12px;
+  max-height: 520px;
+  margin-top: 12px;
+  padding: 2px 6px 8px 2px;
+  overflow: auto;
+}
+
+.commission-held-job-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #cbdde7;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #fff 0%, #f8fbfd 100%);
+  box-shadow: 0 4px 14px rgb(11 49 81 / 7%);
+}
+
+.commission-held-job-card__identity {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  color: #173f5b;
+}
+
+.commission-held-job-card__identity b {
+  font-size: 15px;
+}
+
+.commission-held-job-card__identity small {
+  display: block;
+  margin-top: 3px;
+  color: #647783;
+}
+
+.commission-held-job-card__identity > span {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #e7f4fb;
+  color: #0f6f9c;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.commission-held-job-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.commission-held-job-card__metrics > div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.commission-held-job-card__metrics small,
+.commission-held-job-card__workflow small:first-child {
+  display: block;
+  margin-bottom: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+.commission-held-job-card__metrics b {
+  color: #b45309;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.commission-held-job-card__metrics b.is-paid { color: #047857; }
+.commission-held-job-card__metrics b.is-manual { color: #b91c1c; }
+
+.commission-held-job-card__workflow {
+  display: grid;
+  grid-template-columns: minmax(130px, .8fr) minmax(160px, 1fr) minmax(190px, 1.25fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.commission-held-job-list__empty {
+  grid-column: 1 / -1;
+  padding: 28px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  color: #64748b;
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .commission-held-job-card__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .commission-held-job-card__workflow { grid-template-columns: 1fr; align-items: stretch; }
+}
+
+.commission-held-jobs-table-wrap {
+  border-color: #cbdde7 !important;
+  scrollbar-gutter: stable;
+}
+
+.commission-held-jobs-table {
+  width: 100%;
+  min-width: 1355px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.commission-held-jobs-table .commission-held-col-job { width: 160px; }
+.commission-held-jobs-table .commission-held-col-sale { width: 160px; }
+.commission-held-jobs-table .commission-held-col-money { width: 100px; }
+.commission-held-jobs-table .commission-held-col-status { width: 135px; }
+.commission-held-jobs-table .commission-held-col-method { width: 160px; }
+.commission-held-jobs-table .commission-held-col-note { width: 250px; }
+.commission-held-jobs-table .commission-held-col-actions { width: 190px; }
+
+.commission-held-jobs-table th,
+.commission-held-jobs-table td {
+  box-sizing: border-box;
+  vertical-align: middle !important;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.commission-held-jobs-table th:nth-child(3),
+.commission-held-jobs-table th:nth-child(4),
+.commission-held-jobs-table th:nth-child(5),
+.commission-held-money-cell {
+  text-align: right !important;
+}
+
+.commission-held-jobs-table tbody tr {
+  min-height: 76px;
+}
+
+.commission-held-job-cell > small,
+.commission-held-status-cell > small {
+  display: block;
+  margin-top: 4px;
+  color: #647783;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.commission-held-sale-cell {
+  color: #173f5b;
+  line-height: 1.4;
+}
+
+.commission-held-control-stack {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+
+.commission-held-method-cell .ui-input,
+.commission-held-note-cell .ui-input {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  margin: 0 !important;
+}
+
+.commission-held-row-actions {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+#root main .commission-held-row-actions > button {
+  flex: 1 1 78px;
+  min-width: 78px !important;
+  min-height: 40px !important;
+  height: 40px !important;
+  margin: 0 !important;
+  padding: 7px 10px !important;
+  white-space: nowrap;
+}
+
+#root main .commission-held-row-actions > button:only-child {
+  flex-basis: 100%;
+}
+
+.commission-tablist {
+  display: grid !important;
+  width: 100% !important;
+  max-width: 100%;
+  margin-top: 12px !important;
+  overflow: visible !important;
+}
+
+.commission-tablist--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.commission-tablist--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.commission-tablist > .app-segmented-tab {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  color: #415b6d !important;
+  font-weight: 700 !important;
+}
+
+.commission-tablist > .app-segmented-tab[aria-selected="true"] {
+  border: 1px solid #91b8cf !important;
+  background: #fff !important;
+  color: #0b3151 !important;
+}
+
+.commission-tablist > .app-segmented-tab > span {
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #dceaf1;
+  color: #244c67;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.commission-tablist > .app-segmented-tab[aria-selected="true"] > span {
+  background: #d8eef9;
+  color: #075985;
+}
+
+.commission-schedule-heading {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0 8px;
+}
+
+.commission-schedule-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.commission-schedule-table {
+  min-width: 960px;
+}
+
+.commission-schedule-job-cell {
+  min-width: 190px;
+}
+
+.commission-schedule-job-cell > div + div {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #e1e8ed;
+}
+
+.commission-schedule-job-cell small {
+  display: block;
+  margin-top: 2px;
+  color: #5b7080;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+#root main .commission-schedule-row-actions > button {
+  min-height: 36px !important;
+  height: 36px !important;
+  margin: 0 !important;
+}
+
+@media (max-width: 860px) {
+  .commission-funnel-header {
+    align-items: stretch;
+  }
+
+  .commission-funnel-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  #root main .commission-funnel-actions > button {
+    flex: 1 1 150px;
+  }
+
+  .commission-tablist--three {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Shared single-colour icon language: decorative emoji are intentionally avoided. */
+.app-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  color: currentColor;
+  vertical-align: -0.15em;
+  pointer-events: none;
+}
+
+.sl-tag-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.salary-note-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.salary-note-legend > i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.salary-note-legend--employee { color: #087cae; }
+.salary-note-legend--company { color: #6750a4; }
+.salary-note-legend--deduction { color: #c9364b; }
+
+/* Compact Commission actions: SVG-only controls with readable hover labels. */
+#root main button.commission-icon-action {
+  position: relative;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 !important;
+  border-radius: 9px !important;
+  overflow: visible;
+}
+
+#root main button.commission-history-refresh {
+  width: 36px !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+}
+
+button.commission-icon-action::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 90;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: 180px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #102f49;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(11, 49, 81, .2);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity .15s ease, transform .15s ease;
+  white-space: nowrap;
+}
+
+button.commission-icon-action:hover::after,
+button.commission-icon-action:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.commission-history-actions {
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
+.commission-held-select {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.commission-held-select > select.ui-input {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px !important;
+}
+
+.commission-held-select > .app-icon {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  color: #315b75;
+  transform: translateY(-50%);
+}
+
+.commission-held-select:has(select:disabled) > .app-icon {
+  color: #94a3b8;
+}
+
+/* Contrast guardrails ----------------------------------------------------
+   These selectors intentionally come last so feature/global button rules
+   cannot turn text white on light surfaces or dark on dark surfaces. */
+.panel .department-structure-hero {
+  border-color: #345d78 !important;
+  background: linear-gradient(135deg, #0b3151 0%, #102b49 100%) !important;
+  color: #ffffff !important;
+}
+
+.panel .department-structure-hero h3 {
+  color: #ffffff !important;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .18);
+}
+
+.panel .department-structure-hero .department-structure-eyebrow {
+  color: #bfe3f5 !important;
+}
+
+.panel .department-structure-hero .department-structure-copy {
+  color: #d8eaf3 !important;
+}
+
+.panel .department-structure-hero .department-structure-stat {
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .12) !important;
+  color: #ffffff !important;
+}
+
+/* Compact department cards: actions stay beside the title while summary
+   fields consume only the width required by their content. */
+.department-card-body {
+  display: grid;
+  gap: 10px;
+}
+
+.department-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.department-card-identity {
+  flex: 1 1 auto;
+}
+
+.department-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+#root main .panel button.department-card-action {
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  border-radius: 9px !important;
+}
+
+.department-card-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.department-card-metric {
+  flex: 0 0 112px;
+}
+
+.department-card-manager {
+  flex: 0 1 auto;
+  width: max-content;
+  min-width: 160px;
+  max-width: min(320px, 100%);
+}
+
+.department-card-manager dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .department-card-header {
+    flex-wrap: wrap;
+  }
+
+  .department-card-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .department-card-manager {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+#root main .backup-row-actions > button:hover:not(:disabled),
+#root main button.app-download-button:hover:not(:disabled),
+#root main button.ui-button-secondary:hover:not(:disabled),
+#root main button.icon-only-control:hover:not(:disabled),
+#root main button.dashboard-kpi-action:hover:not(:disabled),
+#root main button.holiday-toolbar-control:hover:not(:disabled) {
+  color: #123e5f !important;
+}
+
+#root main .backup-row-actions > button.backup-restore-trigger:hover:not(:disabled),
+#root main button.app-delete-button:hover:not(:disabled),
+#root main button[class*="delete"]:hover:not(:disabled),
+#root main button[aria-label*="Xóa"]:hover:not(:disabled) {
+  color: #8f1f18 !important;
+}
+
+:is(input, textarea)::placeholder {
+  color: #5b7080 !important;
+  opacity: 1 !important;
+}
+
+:is(input, select, textarea):disabled {
+  color: #566b7a !important;
+  opacity: 1 !important;
+}
+
+#root .branded-date-trigger,
+.ui-modal-backdrop .branded-date-trigger {
+  color: #506879 !important;
+}
+
+#root .branded-date-picker.is-disabled .branded-date-trigger,
+.ui-modal-backdrop .branded-date-picker.is-disabled .branded-date-trigger {
+  color: #627684 !important;
+}
+
+.ui-state,
+.empty-state,
+.empty-placeholder,
+.muted {
+  color: #526979 !important;
+}
+
+.panel :is(.text-slate-400, .text-slate-500, .text-gray-400, .text-gray-500),
+.modal-card :is(.text-slate-400, .text-slate-500, .text-gray-400, .text-gray-500) {
+  color: #526979 !important;
+}
+
+.panel :is(label, th, small),
+.modal-card :is(label, th, small) {
+  text-rendering: optimizeLegibility;
+}
+
+/* Unified segmented tabs -------------------------------------------------
+   Every tablist uses the same neutral surface. The active tab is a light
+   grey tile with a restrained moving halo, never a solid blue block. */
+:where(.app-segmented-tabs, [role="tablist"]) {
+  box-sizing: border-box;
+  padding: 3px !important;
+  gap: 3px !important;
+  border: 1px solid #d4dee5 !important;
+  border-radius: 11px !important;
+  background: #ffffff !important;
+  box-shadow: inset 0 1px 2px rgb(11 49 81 / 5%) !important;
+}
+
+:where(.app-segmented-tabs, [role="tablist"]) > :where(button, [role="tab"]) {
+  min-height: 36px !important;
+  margin: 0 !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #415766 !important;
+  box-shadow: none !important;
+  transform: none !important;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 220ms ease !important;
+}
+
+:where(.app-segmented-tabs, [role="tablist"]) > :where(button, [role="tab"]):hover:not(:disabled):not([aria-selected="true"]) {
+  border-color: #dce4e9 !important;
+  background: #f8fafb !important;
+  color: #173f5b !important;
+}
+
+:where(.app-segmented-tabs, [role="tablist"]) > :where(button.is-active, button.active, button[aria-selected="true"], [role="tab"][aria-selected="true"]) {
+  border-color: #bccbd5 !important;
+  background: #eef1f3 !important;
+  color: #102f49 !important;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 96%),
+    0 0 0 3px rgb(67 153 196 / 22%),
+    0 4px 12px rgb(11 49 81 / 10%) !important;
+  animation: sealink-tab-halo 2.4s ease-in-out infinite;
+}
+
+:where(.app-segmented-tabs, [role="tablist"]) > :where(button, [role="tab"]):disabled {
+  background: #f8fafb !important;
+  color: #8798a4 !important;
+  cursor: not-allowed !important;
+  opacity: 0.72 !important;
+}
+
+.commission-tablist > .app-segmented-tab > span {
+  background: #eef2f4 !important;
+  color: #415766 !important;
+}
+
+.commission-tablist > .app-segmented-tab[aria-selected="true"] > span {
+  background: #dce3e8 !important;
+  color: #102f49 !important;
+}
+
+@keyframes sealink-tab-halo {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / 96%),
+      0 0 0 2px rgb(67 153 196 / 16%),
+      0 4px 10px rgb(11 49 81 / 8%);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / 96%),
+      0 0 0 4px rgb(67 153 196 / 28%),
+      0 5px 14px rgb(11 49 81 / 12%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.app-segmented-tabs, [role="tablist"]) > :where(button.is-active, button.active, button[aria-selected="true"], [role="tab"][aria-selected="true"]) {
+    animation: none !important;
+  }
+}
+
+/* Keep the held-JOB month picker and neighbouring controls on one baseline. */
+.commission-held-jobs-table tbody tr {
+  height: 78px;
+}
+
+.commission-held-jobs-table tbody td {
+  height: 78px;
+  vertical-align: middle !important;
+}
+
+.commission-held-control-stack {
+  display: grid !important;
+  grid-template-rows: 18px 40px;
+  align-content: center;
+  gap: 5px !important;
+  min-height: 63px;
+}
+
+.commission-held-control-stack > b {
+  display: flex;
+  min-height: 18px;
+  margin: 0;
+  align-items: center;
+  line-height: 18px;
+}
+
+.commission-held-select {
+  display: flex !important;
+  height: 40px;
+  align-items: center;
+}
+
+.commission-held-select > select.ui-input,
+.commission-held-note-cell > input.ui-input {
+  display: block !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  margin: 0 !important;
+  line-height: normal !important;
+}
+
+.commission-held-select > .app-icon {
+  top: 20px !important;
+  margin: 0 !important;
+}
+
+.commission-held-row-actions {
+  min-height: 40px;
+  align-items: center !important;
+}
+
+/* Sidebar interaction contract ------------------------------------------------
+   Keep this block last: EnterpriseShell still supplies layout-oriented inline
+   styles, while this layer is the single source of truth for visual states. */
+.sealink-sidebar .sealink-nav-item:not(:hover):not(.is-active),
+.sealink-sidebar .sealink-settings-toggle:not(:hover):not(.is-active) {
+  border-color: transparent !important;
+  outline: 2px solid transparent !important;
+  outline-offset: -1px !important;
+  color: #ffffff !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+.sealink-sidebar .sealink-nav-item:not(:hover):not(.is-active) .sealink-nav-label,
+.sealink-sidebar .sealink-settings-toggle:not(:hover):not(.is-active) .sealink-nav-label,
+.sealink-sidebar .sealink-nav-item:not(:hover):not(.is-active) svg,
+.sealink-sidebar .sealink-settings-toggle:not(:hover):not(.is-active) svg {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+.sealink-sidebar .sealink-nav-item:hover,
+.sealink-sidebar .sealink-settings-toggle:hover,
+.sealink-sidebar .sealink-nav-item.is-active,
+.sealink-sidebar .sealink-settings-toggle.is-active {
+  border-color: transparent !important;
+  outline: 2px solid #0369a1 !important;
+  outline-offset: -1px !important;
+  color: #0369a1 !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 24px rgb(3 105 161 / 24%) !important;
+  text-shadow: none !important;
+  opacity: 1 !important;
+}
+
+.sealink-sidebar .sealink-nav-item:hover .sealink-nav-label,
+.sealink-sidebar .sealink-settings-toggle:hover .sealink-nav-label,
+.sealink-sidebar .sealink-nav-item.is-active .sealink-nav-label,
+.sealink-sidebar .sealink-settings-toggle.is-active .sealink-nav-label,
+.sealink-sidebar .sealink-nav-item:hover > svg,
+.sealink-sidebar .sealink-settings-toggle:hover > svg,
+.sealink-sidebar .sealink-nav-item.is-active > svg,
+.sealink-sidebar .sealink-settings-toggle.is-active > svg {
+  color: #0369a1 !important;
+  opacity: 1 !important;
+}
+
+/* Nested entries use colour/background only; the blue outline is reserved for
+   top-level navigation and parent menus. */
+.sealink-sidebar .sealink-nav-item.is-nested,
+.sealink-sidebar .sealink-nav-item.is-nested:hover,
+.sealink-sidebar .sealink-nav-item.is-nested.is-active,
+.sealink-sidebar .sealink-nav-item.is-nested:focus,
+.sealink-sidebar .sealink-nav-item.is-nested:focus-visible {
+  border-color: transparent !important;
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
+/* Employee detail date fields -------------------------------------------------
+   The detail-grid input normalisation must not expand the native date input
+   used internally by BrandedDateInput. Keep one visible, white trigger only. */
+.employee-detail-modal .employee-detail-grid .branded-date-picker {
+  position: relative !important;
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  margin-top: 6px !important;
+}
+
+.employee-detail-modal .employee-detail-grid input.branded-date-native {
+  position: absolute !important;
+  left: 1px !important;
+  bottom: 1px !important;
+  width: 1px !important;
+  min-width: 1px !important;
+  max-width: 1px !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  max-height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Semantic actions keep their meaning; every non-semantic action uses the
+   shared Sealink blue system defined above. */
+html body #root main button.app-delete-button.app-delete-button.app-delete-button,
+html body #root main button[class*="delete"][class*="delete"][class*="delete"],
+html body #root main button[aria-label*="Xóa"][aria-label*="Xóa"][aria-label*="Xóa"],
+html body #root main button.backup-restore-trigger.backup-restore-trigger.backup-restore-trigger,
+html body #root main button.time-off-reject.time-off-reject.time-off-reject {
+  border-color: #fecaca !important;
+  background-color: #ffffff !important;
+  background-image: none !important;
+  color: #9f1239 !important;
+}
+
+/* Salary approval actions live on a dark footer and previously used translucent
+   inline colors. Keep disabled actions consistent and legible there as well. */
+#root main #salary-approval-actions button:disabled {
+  border-color: #cbd5e1 !important;
+  background-color: #ffffff !important;
+  background-image: none !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
+#root main button.app-delete-button:hover:not(:disabled),
+#root main button[class*="delete"]:hover:not(:disabled),
+#root main button[aria-label*="Xóa"]:hover:not(:disabled),
+#root main button.time-off-reject:hover:not(:disabled) {
+  border-color: #ef4444 !important;
+  background-color: #fff1f2 !important;
+  color: #991b1b !important;
+}
+
+#root main button.time-off-approve {
+  border-color: #86efac !important;
+  background-color: #ffffff !important;
+  background-image: none !important;
+  color: #067647 !important;
+}
+
+#root main button.time-off-more-info {
+  border-color: #fedf89 !important;
+  background-color: #ffffff !important;
+  background-image: none !important;
+  color: #92400e !important;
+}
+
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger,
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger:hover:not(:disabled),
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger:active:not(:disabled),
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger:disabled,
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger[aria-expanded="true"] {
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 12px !important;
+  color: #506879 !important;
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+  line-height: 1.2 !important;
+}
+
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger.has-value {
+  color: var(--navy) !important;
+}
+
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger:hover:not(:disabled),
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger:focus-visible,
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger[aria-expanded="true"] {
+  border-color: #71b7db !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 3px rgb(8 121 190 / 10%) !important;
+}
+
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-detail-modal .employee-detail-grid button.branded-date-trigger > .branded-date-icon {
+  margin-left: auto;
+  color: var(--blue) !important;
+}
+
+/* The create-employee dialog should not place a dark/blurred layer over the
+   employee directory. This is intentionally scoped to that dialog only. */
+#root .employee-create-backdrop {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Employee credential controls share the same input geometry in both the
+   create and detail dialogs. Actions stay inside the field to save space. */
+.modal-card .employee-password-field {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.modal-card .employee-password-field > input {
+  width: 100% !important;
+  margin: 0 !important;
+  padding-right: 76px !important;
+}
+
+.modal-card .employee-password-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transform: translateY(-50%);
+}
+
+.modal-card .employee-password-actions > button,
+.modal-card .employee-password-actions > button:hover:not(:disabled),
+.modal-card .employee-password-actions > button:active:not(:disabled) {
+  display: inline-flex;
+  width: 28px !important;
+  min-width: 28px !important;
+  max-width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  align-items: center;
+  justify-content: center;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid #c8dfec !important;
+  border-radius: 8px !important;
+  color: #0879be !important;
+  background: #ffffff !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.modal-card .employee-password-actions > button:hover:not(:disabled),
+.modal-card .employee-password-actions > button:focus-visible {
+  border-color: #0ea5e9 !important;
+  background: #eef9ff !important;
+  box-shadow: 0 0 0 2px rgb(14 165 233 / 14%) !important;
+}
+
+.modal-card .employee-password-actions > button:disabled {
+  color: #a8bac5 !important;
+  background: #f8fafc !important;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.modal-card input[readonly][title*="Tên đăng nhập"] {
+  color: #365267 !important;
+  background: #f8fafc !important;
+  cursor: default;
+}
+
+/* Timesheet lock state needs to be identifiable without relying on the
+   generic active-button treatment. The icon still mirrors the current state. */
+#root main button.timesheet-lock-control {
+  width: 38px !important;
+  min-width: 38px !important;
+  height: 38px !important;
+  border-width: 1px !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 10px -8px rgb(15 23 42 / 28%) !important;
+}
+
+#root main button.timesheet-lock-control.is-locked {
+  border-color: #fca5a5 !important;
+  background: #ffffff !important;
+  color: #b91c1c !important;
+}
+
+#root main button.timesheet-lock-control.is-unlocked {
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #1f2937 !important;
+}
+
+#root main button.timesheet-lock-control:hover:not(:disabled),
+#root main button.timesheet-lock-control:focus-visible {
+  background: #f1f5f9 !important;
+  color: #111827 !important;
+  box-shadow: 0 0 0 3px rgb(148 163 184 / 24%), 0 6px 14px rgb(15 23 42 / 12%) !important;
+}
+
+#root main button.timesheet-lock-control.is-locked:hover:not(:disabled),
+#root main button.timesheet-lock-control.is-locked:focus-visible {
+  border-color: #ef4444 !important;
+  background: #fff1f2 !important;
+  color: #991b1b !important;
+  box-shadow: 0 0 0 3px rgb(248 113 113 / 18%), 0 6px 14px rgb(15 23 42 / 12%) !important;
+}

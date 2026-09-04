@@ -5,6 +5,7 @@ backend/env/
 
 # Python cache and build artifacts
 backend/__pycache__/
+backend/**/__pycache__/
 backend/**/*.py[cod]
 backend/.pytest_cache/
 backend/.mypy_cache/
@@ -44,6 +45,15 @@ frontend/App_recovered*.tsx
 frontend/App_recovered*.txt
 frontend/App_downloaded.js
 backend/scratch/
+
+# One-off local diagnostics and sample inputs are not production source.
+backend/excel_headers.txt
+backend/fix*.py
+backend/query_db.py
+backend/script.py
+backend/test_*.xlsx
+backend/test_*.csv
+backend/verify_accounting_payroll_days.py
 
 # Editor, agent and generated QA artefacts. These are not application source.
 .vscode/

@@ -1,19 +1,19 @@
 .time-off-attachments { background: #f8fbfe; border: 1px solid #d9e7f1; border-radius: 11px; display: grid; gap: 10px; grid-column: 1 / -1; padding: 13px; }
 .time-off-attachments-heading h4 { color: #183b5b; font-size: 13px; margin: 0; }
 .time-off-attachments-heading h4 b { color: #d92d20; }
-.time-off-attachments-heading p { color: #6b8094; font-size: 10px; margin: 4px 0 0; }
+.time-off-attachments-heading p { color: #6b8094; font-size: 11px; margin: 4px 0 0; }
 .time-off-attachments-upload-row { align-items: center; background: #edf4f9; border-radius: 9px; display: flex; flex-wrap: wrap; gap: 9px; min-height: 47px; padding: 7px; }
 .time-off-attachments-upload-row > input { height: 1px !important; margin: -1px; min-height: 1px !important; opacity: 0; overflow: hidden; padding: 0 !important; position: absolute; width: 1px !important; }
 .time-off-attachments-upload-button { align-items: center; background: #fff; border: 1px solid #a9c3d5; border-radius: 7px; color: #174a70; cursor: pointer; display: inline-flex; flex: 0 0 auto; font: inherit; font-size: 11px; font-weight: 750; gap: 6px; min-height: 32px; padding: 0 10px; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .time-off-attachments-upload-button:hover:not(:disabled) { background: #e5f4fd; border-color: #1686ba; box-shadow: 0 4px 9px rgba(15, 95, 148, .12); transform: translateY(-1px); }
 .time-off-attachments-upload-button:disabled { cursor: not-allowed; opacity: .55; }
 .time-off-attachments-upload-button > span { font-size: 15px; line-height: 1; }
-.time-off-attachments-upload-row > small { color: #667e92; font-size: 10px; }
+.time-off-attachments-upload-row > small { color: #667e92; font-size: 11px; }
 .time-off-attachments-list { display: grid; gap: 6px; list-style: none; margin: 0; padding: 0; }
 .time-off-attachments-list li { align-items: center; background: #fff; border: 1px solid #d9e7f1; border-radius: 8px; color: #2b668a; display: grid; gap: 7px; grid-template-columns: auto minmax(0, 1fr) auto auto; min-height: 34px; padding: 6px 8px; }
 .time-off-attachments-list li > span { font-size: 13px; }
-.time-off-attachments-list strong { color: #25455e; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.time-off-attachments-list small { color: #71879a; font-size: 9px; white-space: nowrap; }
+.time-off-attachments-list strong { color: #25455e; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.time-off-attachments-list small { color: #71879a; font-size: 11px; white-space: nowrap; }
 .time-off-attachments-list button { background: transparent; border: 0; color: #b42318; cursor: pointer; font: inherit; font-size: 17px; line-height: 1; padding: 2px 4px; }
-.time-off-attachments-error { color: #b42318; font-size: 10px; margin: 0; }
+.time-off-attachments-error { color: #b42318; font-size: 11px; margin: 0; }
 @media (max-width: 560px) { .time-off-attachments-list li { grid-template-columns: auto minmax(0, 1fr) auto; } .time-off-attachments-list small { grid-column: 2 / -1; } }

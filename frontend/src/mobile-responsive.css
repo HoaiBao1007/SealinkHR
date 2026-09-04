@@ -1,0 +1,518 @@
+/*
+ * Mobile-only presentation layer.
+ *
+ * Keep every rule behind a compact-viewport media query so the existing
+ * desktop layout (901px and wider) remains byte-for-byte identical in the
+ * cascade.  The higher-specificity shell rules intentionally neutralise the
+ * legacy catch-all selectors in App.css only on phones and tablets.
+ */
+
+@media (max-width: 900px) {
+  html,
+  body,
+  #root,
+  .sealink-app-shell {
+    width: 100% !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    max-height: 100dvh !important;
+  }
+
+  /* The main column is the only vertical scroll owner on compact screens. */
+  #root .sealink-main-column {
+    height: 100dvh !important;
+    min-height: 0 !important;
+    max-height: 100dvh !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #root .sealink-main-column > main.sealink-content {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 16px !important;
+  }
+
+  #root .sealink-main-column > main.sealink-content > .panel {
+    display: grid !important;
+    flex: none !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    gap: 16px !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  .sealink-app-shell > aside.sealink-sidebar,
+  .sealink-rail-inner {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+  }
+
+  .sealink-rail-toggle {
+    top: 12px !important;
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .sealink-topbar {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 150 !important;
+  }
+
+  .sealink-topbar-title {
+    padding-left: 50px;
+  }
+
+  .time-off-hero .time-off-primary {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* Prevent the compact date trigger from inheriting generic .panel button rules. */
+  #root main.sealink-content .date-time-range,
+  #root main.sealink-content .date-time-range-trigger {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  #root main.sealink-content .date-time-range-trigger {
+    display: grid !important;
+    margin-top: 0 !important;
+    border: 1px solid #cbd8e6 !important;
+    color: #172b43 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  #root main.sealink-content .date-time-range-summary strong,
+  #root main.sealink-content .date-time-range-summary > span,
+  #root main.sealink-content .date-time-range-trigger > small,
+  #root main.sealink-content .date-time-range-chevron {
+    color: #172b43 !important;
+  }
+
+  /* KPI overview: retain the desktop row above 640px, stack on phones. */
+  .salary-pie-chart {
+    min-width: 0;
+  }
+
+  /* Personal payslip ---------------------------------------------------- */
+  .mobile-payslip-page,
+  .mobile-held-bonus-page {
+    width: 100%;
+    max-width: 100% !important;
+  }
+
+  .mobile-payslip-toolbar__actions,
+  .mobile-held-bonus-toolbar__actions,
+  .mobile-held-bonus-request {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .sealink-topbar {
+    min-height: 68px !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 8px 12px !important;
+  }
+
+  .sealink-topbar-title {
+    min-width: 0 !important;
+    flex: 1 1 auto;
+  }
+
+  .sealink-topbar-title > p {
+    display: none !important;
+  }
+
+  .sealink-topbar-title > h1 {
+    max-width: 100%;
+    margin: 0 !important;
+    font-size: 16px !important;
+    line-height: 1.25 !important;
+  }
+
+  .sealink-topbar-actions {
+    width: auto !important;
+    flex: 0 0 auto;
+    gap: 6px !important;
+  }
+
+  .notification-trigger,
+  .sealink-user-menu > summary {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .sealink-user-menu > summary {
+    gap: 4px !important;
+    padding: 4px 6px 4px 4px !important;
+  }
+
+  /* Descriptive copy is available in the drawer; keep only real controls. */
+  .sealink-page-context {
+    min-height: 0 !important;
+    gap: 0 !important;
+    padding: 0 12px !important;
+    border-bottom: 0 !important;
+  }
+
+  .sealink-page-context > p {
+    display: none !important;
+  }
+
+  .sealink-page-context:has(> div) {
+    padding-block: 8px !important;
+    border-bottom: 1px solid #dce8f5 !important;
+  }
+
+  .sealink-page-context > div {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .sealink-statusbar {
+    display: none !important;
+  }
+
+  #root .sealink-main-column > main.sealink-content {
+    padding: 12px !important;
+  }
+
+  #root .sealink-main-column > main.sealink-content > .panel {
+    gap: 14px !important;
+  }
+
+  #root main.sealink-content .card {
+    padding: 14px !important;
+    border-radius: 16px !important;
+  }
+
+  #root main.sealink-content button:not(.app-close-button):not(.department-tree-toggle),
+  #root main.sealink-content select,
+  #root main.sealink-content input:not([type='checkbox']):not([type='radio']):not([type='file']) {
+    min-height: 44px;
+  }
+
+  /* Dashboard KPI chart */
+  .salary-pie-chart {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 14px !important;
+    padding: 16px !important;
+    border-radius: 18px !important;
+  }
+
+  .salary-pie-chart__visual svg {
+    width: 164px;
+    height: 164px;
+  }
+
+  .salary-pie-chart__legend {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 4px !important;
+  }
+
+  .salary-pie-chart__legend-item {
+    width: 100%;
+    padding: 9px 4px !important;
+  }
+
+  .salary-pie-chart__legend-item code {
+    overflow: visible !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  /* Time-off forms */
+  .time-off-dashboard-card {
+    margin-top: 14px !important;
+    border-radius: 18px !important;
+  }
+
+  .time-off-dashboard-header {
+    gap: 14px !important;
+    padding: 16px !important;
+    border-radius: 18px 18px 0 0 !important;
+  }
+
+  .time-off-dashboard-heading {
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .time-off-dashboard-icon {
+    width: 42px !important;
+    height: 42px !important;
+    flex-basis: 42px !important;
+  }
+
+  .time-off-dashboard-form {
+    padding: 14px !important;
+  }
+
+  .time-off-dashboard-identity,
+  .time-off-dashboard-fields {
+    width: 100%;
+    gap: 10px;
+  }
+
+  .time-off-dashboard-link,
+  .time-off-dashboard-actions button,
+  .time-off-attachments-upload-button {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  .time-off-dashboard-actions {
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+
+  .time-off-dashboard-actions p {
+    order: -2;
+  }
+
+  .time-off-dashboard-actions button {
+    order: 0 !important;
+  }
+
+  #root main.sealink-content .date-time-range-trigger {
+    min-height: 60px !important;
+    grid-template-columns: 30px minmax(0, 1fr) 16px !important;
+    gap: 8px !important;
+    padding: 7px 10px !important;
+  }
+
+  #root main.sealink-content .date-time-range-summary {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px !important;
+  }
+
+  #root main.sealink-content .date-time-range-summary > .app-icon {
+    display: none !important;
+  }
+
+  #root main.sealink-content .date-time-range-summary strong {
+    display: block !important;
+    overflow: hidden;
+    color: #172b43 !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .time-off-hero {
+    gap: 16px !important;
+    padding: 16px !important;
+    border-radius: 18px !important;
+  }
+
+  .time-off-hero h2 {
+    font-size: 22px !important;
+  }
+
+  .time-off-view-tabs {
+    margin-inline: -12px;
+    padding-inline: 12px;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+
+  .time-off-view-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .time-off-view-tabs button {
+    min-height: 44px !important;
+    scroll-snap-align: start;
+  }
+
+  .time-off-calendar-card,
+  .time-off-list-card,
+  .time-off-request-form,
+  .time-off-form-aside {
+    border-radius: 16px !important;
+  }
+
+  /* Personal payslip */
+  .mobile-payslip-page {
+    gap: 14px !important;
+  }
+
+  .mobile-payslip-toolbar {
+    gap: 14px !important;
+    padding: 16px !important;
+    border-radius: 18px !important;
+  }
+
+  .mobile-payslip-toolbar h2 {
+    font-size: 18px !important;
+  }
+
+  .mobile-payslip-toolbar__actions {
+    display: grid !important;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .mobile-payslip-toolbar__actions .month-year-select {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #root main.sealink-content .mobile-payslip-toolbar__actions > button {
+    width: 100% !important;
+    margin: 0 !important;
+  }
+
+  .mobile-payslip-document {
+    gap: 20px !important;
+    padding: 18px 16px !important;
+    border-radius: 18px !important;
+  }
+
+  .mobile-payslip-document img {
+    width: 52px !important;
+    height: 52px !important;
+    border-radius: 13px !important;
+  }
+
+  .mobile-payslip-document h3 {
+    font-size: 17px !important;
+  }
+
+  .mobile-payslip-document table {
+    min-width: 560px;
+  }
+
+  .mobile-payslip-document .payslip-commission-job-list {
+    max-height: none !important;
+  }
+
+  /* Sale: JOB bonus on hold */
+  .mobile-held-bonus-page {
+    gap: 14px !important;
+  }
+
+  .mobile-held-bonus-toolbar,
+  .mobile-held-bonus-period,
+  .mobile-held-bonus-notice,
+  .mobile-held-bonus-card,
+  .mobile-held-bonus-empty {
+    border-radius: 16px !important;
+  }
+
+  .mobile-held-bonus-toolbar {
+    gap: 14px !important;
+    padding: 16px !important;
+  }
+
+  .mobile-held-bonus-toolbar h2 {
+    font-size: 19px !important;
+  }
+
+  .mobile-held-bonus-toolbar__actions {
+    display: grid !important;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px !important;
+  }
+
+  .mobile-held-bonus-toolbar__actions > span {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  #root main.sealink-content .mobile-held-bonus-toolbar__actions > button {
+    margin: 0 !important;
+  }
+
+  .mobile-held-bonus-period,
+  .mobile-held-bonus-notice {
+    padding: 14px !important;
+  }
+
+  .mobile-held-bonus-period select {
+    width: 100% !important;
+  }
+
+  .mobile-held-bonus-card {
+    padding: 16px !important;
+  }
+
+  .mobile-held-bonus-total {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 12px;
+    padding: 12px 14px !important;
+    text-align: left !important;
+  }
+
+  .mobile-held-bonus-total p {
+    margin: 0 !important;
+  }
+
+  .mobile-held-bonus-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .mobile-held-bonus-metrics > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .mobile-held-bonus-request {
+    width: 100%;
+  }
+
+  #root main.sealink-content .mobile-held-bonus-request > input,
+  #root main.sealink-content .mobile-held-bonus-request > button {
+    width: 100% !important;
+    margin: 0 !important;
+  }
+
+  .mobile-held-bonus-empty {
+    padding: 28px 18px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .sealink-topbar-title {
+    padding-left: 46px;
+  }
+
+  .mobile-payslip-toolbar__actions,
+  .mobile-held-bonus-toolbar__actions,
+  .mobile-held-bonus-metrics {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .mobile-held-bonus-metrics > div:last-child {
+    grid-column: auto;
+  }
+}

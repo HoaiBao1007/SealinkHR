@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { cake_salary, DEFAULT_SALARY_POLICY, type SalaryPolicy, type SalaryTaxBracket } from './shared/utils/salary'
+import { EMPLOYEE_CONTRACT_OPTIONS, isFixedTermEmployeeContract } from './shared/employeeContract'
 import { formatVnd } from './shared/utils/currency'
 import * as XLSX from 'xlsx'
 import './App.css'
@@ -16,14 +17,33 @@ import { LockWarningModal } from './components/LockWarningModal'
 import { useConfirmDialog } from './shared/ui/ConfirmDialog'
 import { LoadingState } from './shared/ui'
 import { VndInput } from './shared/ui/VndInput'
+import { BrandedDateInput } from './shared/ui/BrandedDateInput'
+import { AppIcon } from './shared/ui/AppIcon'
+import { closestMonthPeriod, currentMonthPeriod, MonthYearSelect } from './shared/ui/MonthYearSelect'
+import {
+  filterTimesheetRows,
+  paginateTimesheetRows,
+  TIMESHEET_PAGE_SIZE,
+  type TimesheetAbnormalFilter,
+} from './shared/utils/timesheetGrid'
+import {
+  EMPLOYEE_DIRECTORY_PAGE_SIZE,
+  filterEmployeeDirectoryRows,
+  paginateEmployeeDirectoryRows,
+  type EmployeeDirectoryStatusFilter,
+} from './shared/utils/employeeDirectory'
 import { TimeOffDashboardForm } from './modules/time-off/TimeOffDashboardForm'
 import {
   HrDashboard,
   HrEmployees,
   ItOperations,
+  PersonalAccount,
   PersonalDashboard,
   PersonalAttendanceGrid,
 } from './modules/roles/RolePortals'
+import { OnboardingPublic } from './modules/onboarding/OnboardingPublic'
+import { OffboardingPublic } from './modules/offboarding/OffboardingPublic'
+import { notifyDataChanged, subscribeDataChanged, type DataChangedDetail } from './shared/api/dataSync'
 
 const SalaryDataGrid = lazy(() => import('./modules/salary/SalaryDataGrid').then((module) => ({ default: module.SalaryDataGrid })))
 const CommissionTab = lazy(() => import('./modules/commission/CommissionTab').then((module) => ({ default: module.CommissionTab })))
@@ -31,6 +51,28 @@ const DepartmentTab = lazy(() => import('./modules/departments/DepartmentTab').t
 const SalaryDecisionsSection = lazy(() => import('./modules/employees/SalaryDecisionsSection').then((module) => ({ default: module.SalaryDecisionsSection })))
 const HolidayConfigurator = lazy(() => import('./modules/timesheet/HolidayConfigurator').then((module) => ({ default: module.HolidayConfigurator })))
 const TimeOffManagement = lazy(() => import('./modules/time-off/TimeOffManagement').then((module) => ({ default: module.TimeOffManagement })))
+const OnboardingAdmin = lazy(() => import('./modules/onboarding/OnboardingAdmin').then((module) => ({ default: module.OnboardingAdmin })))
+const OffboardingAdmin = lazy(() => import('./modules/offboarding/OffboardingAdmin').then((module) => ({ default: module.OffboardingAdmin })))
+
+type SalaryApprovalStatus = 'DRAFT' | 'CONFIRMED' | 'PENDING_APPROVAL' | 'APPROVED'
+
+type SalaryApprovalState = {
+  period: string
+  status: SalaryApprovalStatus
+  confirmed_by_user_id: number | null
+  confirmed_at: string | null
+  requested_by_user_id: number | null
+  requested_at: string | null
+  approved_by_user_id: number | null
+  approved_at: string | null
+}
+
+type SalaryPeriodItem = {
+  period: string
+  is_published: boolean
+  input_count: number
+  approval_status: SalaryApprovalStatus
+}
 
 type SalaryPolicyForm = SalaryPolicy & {
   name: string
@@ -65,6 +107,113 @@ const SALARY_POLICY_VND_FIELDS: SalaryPolicyVndField[] = [
   'dependent_deduction',
   'probation_withholding_threshold',
 ]
+
+const REMEMBER_LOGIN_PREFERENCE_KEY = 'sealink.remember-login'
+const REMEMBER_LOGIN_USERNAME_KEY = 'sealink.remembered-username'
+
+function usernameFromCompanyEmail(email: string): string {
+  const localPart = email.trim().split('@', 1)[0] || ''
+  return localPart
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '')
+}
+
+function secureRandomIndex(length: number): number {
+  if (length <= 0) return 0
+  const randomValue = new Uint32Array(1)
+  window.crypto.getRandomValues(randomValue)
+  return randomValue[0] % length
+}
+
+function generateEmployeePassword(): string {
+  const groups = [
+    'ABCDEFGHJKLMNPQRSTUVWXYZ',
+    'abcdefghijkmnopqrstuvwxyz',
+    '23456789',
+    '!@#$%&*?',
+  ]
+  const allCharacters = groups.join('')
+  const characters = groups.map((group) => group[secureRandomIndex(group.length)])
+  while (characters.length < 12) characters.push(allCharacters[secureRandomIndex(allCharacters.length)])
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const swapIndex = secureRandomIndex(index + 1)
+    ;[characters[index], characters[swapIndex]] = [characters[swapIndex], characters[index]]
+  }
+  return characters.join('')
+}
+
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  if (!value) return false
+  try {
+    await navigator.clipboard.writeText(value)
+    return true
+  } catch {
+    const temporaryInput = document.createElement('textarea')
+    temporaryInput.value = value
+    temporaryInput.setAttribute('readonly', '')
+    temporaryInput.style.position = 'fixed'
+    temporaryInput.style.opacity = '0'
+    document.body.appendChild(temporaryInput)
+    temporaryInput.select()
+    const copied = document.execCommand('copy')
+    temporaryInput.remove()
+    return copied
+  }
+}
+
+type EmployeePasswordFieldProps = {
+  value: string
+  onChange: (value: string) => void
+  onNotice: (message: string) => void
+  placeholder: string
+  inputClassName?: string
+}
+
+function EmployeePasswordField({ value, onChange, onNotice, placeholder, inputClassName = '' }: EmployeePasswordFieldProps) {
+  const copyPassword = async (password: string, generated = false) => {
+    const copied = await copyTextToClipboard(password)
+    onNotice(copied
+      ? generated ? 'Đã tạo và sao chép mật khẩu 12 ký tự.' : 'Đã sao chép mật khẩu.'
+      : 'Không thể sao chép tự động. Hãy chọn và sao chép mật khẩu thủ công.')
+  }
+
+  return (
+    <span className="employee-password-field">
+      <input
+        type="password"
+        className={inputClassName}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        autoComplete="new-password"
+      />
+      <span className="employee-password-actions">
+        <button
+          type="button"
+          title="Tạo và sao chép mật khẩu ngẫu nhiên 12 ký tự"
+          aria-label="Tạo và sao chép mật khẩu ngẫu nhiên 12 ký tự"
+          onClick={() => {
+            const password = generateEmployeePassword()
+            onChange(password)
+            void copyPassword(password, true)
+          }}
+        >
+          <AppIcon name="bolt" size={15} />
+        </button>
+        <button
+          type="button"
+          title="Sao chép mật khẩu"
+          aria-label="Sao chép mật khẩu"
+          disabled={!value}
+          onClick={() => void copyPassword(value)}
+        >
+          <AppIcon name="copy" size={15} />
+        </button>
+      </span>
+    </span>
+  )
+}
 
 /**
  * Currency fields are formatted while typing. Browser input can temporarily
@@ -117,8 +266,22 @@ const navigationTabs: EnterpriseShellItem[] = [
     icon: 'departments',
   },
   {
+    key: 'onboarding',
+    label: 'Onboarding',
+    title: 'Onboarding nhân viên mới',
+    description: 'Tùy chỉnh biểu mẫu công khai, duyệt hồ sơ tạm và tạo nhân viên chính thức sau phê duyệt.',
+    icon: 'employees',
+  },
+  {
+    key: 'offboarding',
+    label: 'Offboarding',
+    title: 'Nghỉ việc & bàn giao',
+    description: 'Gửi và xử lý đơn xin nghỉ việc theo luồng Trưởng bộ phận, Nhân sự và Giám đốc.',
+    icon: 'leave',
+  },
+  {
     key: 'timesheets',
-    label: 'Bảng công',
+    label: 'Bảng công công ty',
     title: 'Bảng công và phê duyệt',
     description: 'Tra cứu tháng công 23 → 22, phê duyệt bảng công, theo dõi bất thường và quản lý lịch sử override.',
     icon: 'timesheets',
@@ -139,50 +302,63 @@ const navigationTabs: EnterpriseShellItem[] = [
   },
   {
     key: 'salary',
-    label: 'Bảng lương',
+    label: 'Bảng lương công ty',
     title: 'Tính toán & Quản lý lương',
     description: 'Nhập tay biến động lương theo tháng, quản lý cấu hình lương hợp đồng và xuất báo cáo lương Sealink tự động.',
     icon: 'salary' as any,
   },
 ]
 
+const personalAccountNavigationTab: EnterpriseShellItem = {
+  key: 'my-account',
+  label: 'Thông tin cá nhân',
+  title: 'Thông tin cá nhân',
+  description: 'Cập nhật email, số điện thoại, tên đăng nhập và bảo mật tài khoản của bạn.',
+  icon: 'employees',
+}
+
 const hrNavigationTabs: EnterpriseShellItem[] = [
   { key: 'dashboard', label: 'Dashboard', title: 'Tổng quan nhân sự', description: 'Theo dõi nhân sự và tình trạng bảng công, không hiển thị dữ liệu lương hoặc bonus.', icon: 'dashboard' },
   { key: 'employees', label: 'Nhân sự', title: 'Hồ sơ nhân sự', description: 'Thêm và chỉnh sửa hồ sơ nhân viên trong phạm vi vận hành, không có trường tài chính.', icon: 'employees' },
   { key: 'departments', label: 'Phòng ban', title: 'Cơ cấu tổ chức', description: 'Quản lý phòng ban, sơ đồ tổ chức và phân bổ nhân sự.', icon: 'departments' },
-  { key: 'timesheets', label: 'Bảng công', title: 'Bảng công và phê duyệt', description: 'Import, rà soát, chỉnh sửa và phê duyệt dữ liệu chấm công.', icon: 'timesheets' },
+  { key: 'onboarding', label: 'Onboarding', title: 'Onboarding nhân viên mới', description: 'Tùy chỉnh biểu mẫu công khai, duyệt hồ sơ tạm và tạo nhân viên chính thức sau phê duyệt.', icon: 'employees' },
+  { key: 'offboarding', label: 'Offboarding', title: 'Nghỉ việc & bàn giao', description: 'Tiếp nhận và xử lý đơn xin nghỉ việc theo quy trình nội bộ.', icon: 'leave' },
+  { key: 'timesheets', label: 'Bảng công công ty', title: 'Bảng công và phê duyệt', description: 'Import, rà soát, chỉnh sửa và phê duyệt dữ liệu chấm công.', icon: 'timesheets' },
   { key: 'time-off', label: 'Time Off', title: 'Time Off Management', description: 'Quản lý yêu cầu nghỉ, duyệt theo Manager và lịch nghỉ chung.', icon: 'timesheets' },
   { key: 'export', label: 'Xuất báo cáo', title: 'Xuất báo cáo HR', description: 'Xuất báo cáo chấm công và KPI nhân sự.', icon: 'export' },
   { key: 'my-payslip', label: 'Phiếu lương của tôi', title: 'Phiếu Lương Cá Nhân', description: 'Xem phiếu lương của chính bạn theo từng tháng đã phát hành.', icon: 'salary' },
   { key: 'my-attendance', label: 'Chấm công của tôi', title: 'Chấm Công Cá Nhân', description: 'Đối chiếu ngày và ký hiệu chấm công của chính bạn.', icon: 'timesheets' },
+  personalAccountNavigationTab,
 ]
 
 const personalNavigationTabs: EnterpriseShellItem[] = [
-  { key: 'personal-dashboard', label: 'Dashboard', title: 'Tổng quan cá nhân', description: 'Tóm tắt hồ sơ, phiếu lương, chấm công và quản lý tài khoản của bạn.', icon: 'dashboard' },
+  { key: 'personal-dashboard', label: 'Dashboard', title: 'Tổng quan cá nhân', description: 'Tóm tắt hồ sơ, phiếu lương và chấm công của bạn.', icon: 'dashboard' },
   { key: 'time-off', label: 'Time Off', title: 'Time Off Management', description: 'Gửi yêu cầu nghỉ, theo dõi trạng thái và xem lịch nghỉ đã duyệt.', icon: 'timesheets' },
   { key: 'my-payslip', label: 'Phiếu lương cá nhân', title: 'Phiếu Lương Cá Nhân', description: 'Xem chi tiết thu nhập, phụ cấp, bảo hiểm và thuế TNCN theo từng tháng lương.', icon: 'salary' },
   { key: 'my-attendance', label: 'Chấm công của tôi', title: 'Chấm Công Cá Nhân', description: 'Đối chiếu ngày và ký hiệu chấm công theo dạng lưới cô đọng.', icon: 'timesheets' },
   { key: 'my-held-bonuses', label: 'Bonus đang giữ', title: 'JOB Bonus Đang Giữ', description: 'Theo dõi JOB đang giữ bonus và gửi yêu cầu kế toán duyệt chi trả.', icon: 'salary' },
+  personalAccountNavigationTab,
 ]
 
 const chiefAccountantNavigationTabs: EnterpriseShellItem[] = [
   ...navigationTabs,
   { key: 'my-payslip', label: 'Phiếu lương của tôi', title: 'Phiếu Lương Cá Nhân', description: 'Xem phiếu lương của chính bạn theo từng tháng đã phát hành.', icon: 'salary' },
   { key: 'my-attendance', label: 'Chấm công của tôi', title: 'Chấm Công Cá Nhân', description: 'Đối chiếu ngày và ký hiệu chấm công của chính bạn.', icon: 'timesheets' },
+  personalAccountNavigationTab,
 ]
 
-const isBusinessAdminRole = (role?: string | null) => role === 'ADMIN' || role === 'IT_ADMIN'
+const isBusinessAdminRole = (role?: string | null) => role === 'ADMIN' || role === 'DIRECTOR' || role === 'IT_ADMIN'
 
 const itNavigationTabs: EnterpriseShellItem[] = [
   ...navigationTabs,
   { key: 'it-backups', label: 'Backup dữ liệu', title: 'Backup Cơ Sở Dữ Liệu', description: 'Theo dõi backup tự động hằng ngày và tạo bản backup có checksum.', icon: 'export' },
   { key: 'it-audit', label: 'Nhật ký hệ thống', title: 'Audit Hệ Thống', description: 'Tra cứu lịch sử thao tác ở chế độ chỉ đọc.', icon: 'timesheets' },
+  personalAccountNavigationTab,
 ]
 
 type Employee = {
   id: number
   machine_employee_id: string
-  biometric_id: string | null
   full_name: string
   notion_name: string | null
   department_code: string | null
@@ -221,8 +397,23 @@ type Employee = {
   access_role?: string
   access_role_reason?: string
   start_date: string | null
+  contract_type: string | null
+  contract_sign_date: string | null
+  contract_start_date: string | null
+  contract_end_date: string | null
   resignation_period: string | null
+  last_working_date: string | null
+  last_pay_date: string | null
   bonus_coefficient?: number
+}
+
+function employeeWithDerivedUsername(employee: Employee): Employee {
+  // The API username is authoritative when a login account already exists.
+  // For employees without an account, the email prefix is only a UI suggestion;
+  // it must not make an unrelated profile update look like account creation.
+  if (employee.username) return employee
+  const username = usernameFromCompanyEmail(employee.company_email || '')
+  return username ? { ...employee, username } : employee
 }
 
 type EmployeeFormState = {
@@ -256,20 +447,31 @@ type EmployeeFormState = {
   username: string
   password: string
   start_date: string
+  contract_type: string
+  contract_sign_date: string
+  contract_start_date: string
+  contract_end_date: string
   resignation_period: string
+  last_working_date: string
+  last_pay_date: string
   bonus_coefficient: string
 }
 
-type EmployeeType = 'FULLTIME' | 'PROBATION' | 'INTERN'
+type EmployeeType = 'FULLTIME' | 'PROBATION' | 'INTERN' | 'TRAINEE'
 
 const ACCESS_ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Kế toán trưởng · ADMIN',
+  DIRECTOR: 'GIÁM ĐỐC · DIRECTOR',
   HR_ADMIN: 'Admin vận hành · HR_ADMIN',
   IT_ADMIN: 'Quản trị hệ thống cấp cao · IT_ADMIN',
   USER: 'Nhân viên · USER',
 }
 
-const inferAccessRolePreview = (departmentName?: string | null, position?: string | null) => {
+const inferAccessRolePreview = (
+  departmentName?: string | null,
+  position?: string | null,
+  employeeName?: string | null,
+) => {
   const normalize = (value?: string | null) => String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -278,6 +480,8 @@ const inferAccessRolePreview = (departmentName?: string | null, position?: strin
     .trim()
   const department = normalize(departmentName)
   const title = normalize(position)
+  const employee = normalize(employeeName)
+  if (employee === 'ton that trung kien' || employee === 'to to van') return 'DIRECTOR'
   const isItAdminBranch = department === 'it' || department.includes('it admin')
   if (!isItAdminBranch) return 'USER'
   if (title === 'admin' || title.startsWith('admin ')) return 'HR_ADMIN'
@@ -288,6 +492,7 @@ const EMPLOYEE_TYPE_LABELS: Record<EmployeeType, string> = {
   FULLTIME: 'Chính thức',
   PROBATION: 'Thử việc',
   INTERN: 'Học việc',
+  TRAINEE: 'Thực tập',
 }
 
 const getContractAllowanceDefaults = (employeeType: string) => (
@@ -358,7 +563,13 @@ const EMPTY_EMPLOYEE_FORM: EmployeeFormState = {
   username: '',
   password: '',
   start_date: '',
+  contract_type: '',
+  contract_sign_date: '',
+  contract_start_date: '',
+  contract_end_date: '',
   resignation_period: '',
+  last_working_date: '',
+  last_pay_date: '',
   bonus_coefficient: '0',
 }
 
@@ -368,25 +579,6 @@ const MONTHLY_SALARY_INPUT_FIELDS = [
   'other_income', 'bonus', 'bonus_14', 'advance_payment', 'pit_refund',
   'other_deductions',
 ] as const
-
-const MONTH_OPTIONS_2026 = [
-  '2026-04', '2026-05', '2026-06', '2026-07', '2026-08',
-  '2026-09', '2026-10', '2026-11', '2026-12',
-] as const
-
-const formatMonthOption = (period: string) => {
-  const [year, month] = period.split('-')
-  return year && month ? `Tháng ${month}/${year}` : period
-}
-
-const formatAttendanceMonthOption = (period: string) => {
-  const [yearText, monthText] = period.split('-')
-  const year = Number(yearText)
-  const month = Number(monthText)
-  if (!year || !month) return period
-  const previous = month === 1 ? 12 : month - 1
-  return `Tháng ${String(month).padStart(2, '0')}/${year} (23/${String(previous).padStart(2, '0')} → 22/${String(month).padStart(2, '0')})`
-}
 
 function salaryInputRestorePayload(input: any, employeeId: number, salaryPeriod: string) {
   const payload: Record<string, any> = { employee_id: employeeId, salary_period: salaryPeriod }
@@ -526,6 +718,7 @@ type TimesheetGridRow = {
   total_early_minutes: number
   total_absent_days: number
   total_work_days: number
+  total_payroll_days: number
   unpaid_leave_days: number
   paid_leave_days: number
   previous_paid_leave_balance: number
@@ -546,6 +739,35 @@ type TimesheetGridResponse = {
   day_columns: TimesheetDayColumn[]
   rows: TimesheetGridRow[]
 }
+
+type TimesheetPeriodRange = {
+  period: string
+  start: string
+  end: string
+}
+
+function formatLocalDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function shiftMonthPeriod(period: string, offset: number): string {
+  const [year, month] = period.split('-').map(Number)
+  const shifted = new Date(year, month - 1 + offset, 1)
+  return currentMonthPeriod(shifted)
+}
+
+function timesheetRangeForPeriod(period: string): TimesheetPeriodRange {
+  const [year, month] = period.split('-').map(Number)
+  const end = new Date(year, month - 1, 22)
+  const start = new Date(year, month - 2, 23)
+  return {
+    period,
+    start: formatLocalDate(start),
+    end: formatLocalDate(end),
+  }
+}
+
+const DEFAULT_TIMESHEET_RANGE = timesheetRangeForPeriod(shiftMonthPeriod(currentMonthPeriod(), -1))
 
 type DashboardTrendPoint = {
   work_date: string
@@ -614,8 +836,7 @@ function mergeEmployeeCheckinBlocks(
   for (const block of blocks) {
     const normalizedBlockId = normalizeMachineEmployeeId(block.employee_id)
     const matchedEmployee = employees.find(
-      (employee) => normalizeMachineEmployeeId(employee.machine_employee_id) === normalizedBlockId
-        || normalizeMachineEmployeeId(employee.biometric_id) === normalizedBlockId,
+      (employee) => normalizeMachineEmployeeId(employee.machine_employee_id) === normalizedBlockId,
     )
     const canonicalId = normalizeMachineEmployeeId(matchedEmployee?.machine_employee_id || normalizedBlockId)
     const current = merged.get(canonicalId)
@@ -1070,7 +1291,7 @@ const TimesheetCell = ({
               <h3 className="text-xs font-extrabold text-slate-800 border-b border-slate-100 pb-1.5 mb-2">Chỉnh sửa ngày {column.key}</h3>
               
               <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                   Ký hiệu công
                   <select
                     value={pendingSymbol}
@@ -1091,7 +1312,7 @@ const TimesheetCell = ({
                   </select>
                 </label>
 
-                <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                   Lý do ghi đè
                   <input
                     type="text"
@@ -1249,10 +1470,10 @@ function SalaryPieChart({ slices }: { slices: PieChartSlice[] }) {
   }
 
   return (
-    <div className="bg-white rounded-[28px] border border-slate-200 p-5 shadow-sm flex flex-row items-center gap-8 w-full animate-[fadeIn_0.3s_ease-out_forwards] flex-shrink-0">
+    <div className="salary-pie-chart bg-white rounded-[28px] border border-slate-200 p-5 shadow-sm flex flex-row items-center gap-8 w-full animate-[fadeIn_0.3s_ease-out_forwards] flex-shrink-0">
 
       {/* ── Biểu đồ tròn — BÊN TRÁI, cố định 200px, không co giãn ── */}
-      <div className="flex-shrink-0 flex flex-col items-center justify-center relative">
+      <div className="salary-pie-chart__visual flex-shrink-0 flex flex-col items-center justify-center relative">
         {total === 0 ? (
           <svg width="200" height="200" viewBox="0 0 200 200">
             <circle cx="100" cy="100" r="80" fill="#f1f5f9" stroke="#e2e8f0" strokeWidth="2" />
@@ -1290,7 +1511,7 @@ function SalaryPieChart({ slices }: { slices: PieChartSlice[] }) {
               })}
               {/* Donut hole */}
               <circle cx="100" cy="100" r="46" fill="#ffffff" />
-              <text x="100" y="94" textAnchor="middle" fill="#94a3b8" fontSize="7.5" fontWeight="700" letterSpacing="0.12em">TỔNG CỘNG</text>
+              <text x="100" y="94" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="700" letterSpacing="0.08em">TỔNG CỘNG</text>
               <text x="100" y="110" textAnchor="middle" fill="#0f172a" fontSize="13" fontWeight="800">
                 {total > 1000000000
                   ? `${(total / 1000000000).toFixed(2)}B`
@@ -1301,13 +1522,13 @@ function SalaryPieChart({ slices }: { slices: PieChartSlice[] }) {
             </svg>
           </div>
         )}
-        <p className="mt-2 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Đơn vị: VND</p>
+        <p className="mt-2 text-[11px] font-semibold text-slate-400 uppercase tracking-widest">Đơn vị: VND</p>
       </div>
 
       {/* ── Chú thích — BÊN PHẢI, lưới 2 cột trên màn rộng ── */}
-      <div className="flex-1 min-w-0 grid grid-cols-1 xl:grid-cols-2 gap-x-3 gap-y-1">
+      <div className="salary-pie-chart__legend flex-1 min-w-0 grid grid-cols-1 xl:grid-cols-2 gap-x-3 gap-y-1">
         {formattedSlices.map((slice, i) => (
-          <div key={i} className="flex items-start gap-2.5 px-2.5 py-2 rounded-xl hover:bg-slate-50 transition">
+          <div key={i} className="salary-pie-chart__legend-item flex items-start gap-2.5 px-2.5 py-2 rounded-xl hover:bg-slate-50 transition">
             {/* Màu + % */}
             <div className="flex-shrink-0 flex flex-col items-center gap-1 pt-0.5">
               <div
@@ -1315,7 +1536,7 @@ function SalaryPieChart({ slices }: { slices: PieChartSlice[] }) {
                 style={{ backgroundColor: slice.color, boxShadow: `0 0 6px ${slice.color}80` }}
               />
               <span
-                className="text-[9px] font-bold leading-none px-1 py-0.5 rounded-sm tabular-nums"
+                className="text-[11px] font-bold leading-none px-1 py-0.5 rounded-sm tabular-nums"
                 style={{ color: slice.color, background: `${slice.color}18` }}
               >
                 {slice.percentage.toFixed(0)}%
@@ -1329,8 +1550,8 @@ function SalaryPieChart({ slices }: { slices: PieChartSlice[] }) {
                   {formatCurrency(slice.value)}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 mt-0.5 leading-snug line-clamp-1">{slice.description}</p>
-              <code className="block text-[9px] font-mono text-slate-300 bg-slate-50 border border-slate-100 rounded px-1 py-0.5 mt-1 overflow-x-auto whitespace-nowrap">
+              <p className="text-[11px] text-slate-400 mt-0.5 leading-snug line-clamp-1">{slice.description}</p>
+              <code className="block text-[11px] font-mono text-slate-300 bg-slate-50 border border-slate-100 rounded px-1 py-0.5 mt-1 overflow-x-auto whitespace-nowrap">
                 {slice.formula}
               </code>
             </div>
@@ -1361,11 +1582,20 @@ function App() {
   const [heldBonusNotificationJobId, setHeldBonusNotificationJobId] = useState<number | null>(null)
   const [employeeNotificationId, setEmployeeNotificationId] = useState<number | null>(null)
   const [salaryNotificationEmployeeId, setSalaryNotificationEmployeeId] = useState<number | null>(null)
+  const [salaryApprovalNotificationFocus, setSalaryApprovalNotificationFocus] = useState<{
+    period: string
+    notificationId: number
+  } | null>(null)
   const [timesheetNotificationEmployeeId, setTimesheetNotificationEmployeeId] = useState<number | null>(null)
   const [timeOffNotificationRequestId, setTimeOffNotificationRequestId] = useState<number | null>(null)
 
   // Login Form States
-  const [loginUsername, setLoginUsername] = useState('')
+  const [rememberLogin, setRememberLogin] = useState(() => localStorage.getItem(REMEMBER_LOGIN_PREFERENCE_KEY) === 'true')
+  const [loginUsername, setLoginUsername] = useState(() =>
+    localStorage.getItem(REMEMBER_LOGIN_PREFERENCE_KEY) === 'true'
+      ? localStorage.getItem(REMEMBER_LOGIN_USERNAME_KEY) || ''
+      : '',
+  )
   const [loginPassword, setLoginPassword] = useState('')
   const [showLoginPassword, setShowLoginPassword] = useState(false)
   const [loginError, setLoginError] = useState('')
@@ -1374,22 +1604,21 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('Sẵn sàng kết nối API backend.')
   const [employeeError, setEmployeeError] = useState<string | null>(null)
+  const [lastDataChange, setLastDataChange] = useState<DataChangedDetail | null>(null)
 
   // User Portal States
   const [myPayslipData, setMyPayslipData] = useState<any>(null)
   const [myPayslipPeriod, setMyPayslipPeriod] = useState('')
   const [myPayslipPeriods, setMyPayslipPeriods] = useState<string[]>([])
-  // Keep every planned 2026 payroll month selectable. Published months from
-  // the API are retained as well, so historical payslips are never hidden.
   const myPayslipPeriodOptions = useMemo(
-    () => Array.from(new Set([...myPayslipPeriods, ...MONTH_OPTIONS_2026])).sort().reverse(),
+    () => Array.from(new Set(myPayslipPeriods)).sort().reverse(),
     [myPayslipPeriods],
   )
   const [isDownloadingPayslip, setIsDownloadingPayslip] = useState(false)
   const [payslipPdfStatus, setPayslipPdfStatus] = useState<{ tone: 'loading' | 'success' | 'error'; text: string } | null>(null)
   const myPayslipPdfRef = useRef<HTMLDivElement>(null)
   const [myAttendanceData, setMyAttendanceData] = useState<any[]>([])
-  const [myAttendancePeriod, setMyAttendancePeriod] = useState('2026-06')
+  const [myAttendancePeriod, setMyAttendancePeriod] = useState(currentMonthPeriod)
   const [myHeldBonusJobs, setMyHeldBonusJobs] = useState<any[]>([])
   const [myHeldBonusNotes, setMyHeldBonusNotes] = useState<Record<number, string>>({})
   const [selectedHeldBonusPeriodId, setSelectedHeldBonusPeriodId] = useState<number | null>(null)
@@ -1410,7 +1639,18 @@ function App() {
   )
 
   // Salary / Payroll States
-  const [salaryPeriod, setSalaryPeriod] = useState('2026-05')
+  const [salaryPeriod, setSalaryPeriod] = useState(currentMonthPeriod)
+  const [salaryPeriods, setSalaryPeriods] = useState<SalaryPeriodItem[]>([])
+  const salaryPeriodTouchedRef = useRef(false)
+  const salaryLoadSequenceRef = useRef(0)
+  const salaryPeriodYearBounds = useMemo(() => {
+    const currentYear = new Date().getFullYear()
+    const dataYears = salaryPeriods.map((item) => Number(item.period.slice(0, 4))).filter(Number.isFinite)
+    return {
+      min: Math.min(currentYear - 2, ...dataYears),
+      max: Math.max(currentYear + 3, ...dataYears),
+    }
+  }, [salaryPeriods])
   const [salarySubTab, setSalarySubTab] = useState<'contract' | 'grid' | 'commission'>('grid')
   const [salaryEmployees, setSalaryEmployees] = useState<any[]>([])
   const [salaryInputs, setSalaryInputs] = useState<any[]>([])
@@ -1425,6 +1665,7 @@ function App() {
     entries: Array<{ employeeId: number; previousInput: any | null }>
   } | null>(null)
   const [isSalaryConfirmed, setIsSalaryConfirmed] = useState(false)
+  const [salaryApproval, setSalaryApproval] = useState<SalaryApprovalState | null>(null)
   const [isSalaryLocked, setIsSalaryLocked] = useState(false)
   const [otherIncomeEvidenceEmployeeId, setOtherIncomeEvidenceEmployeeId] = useState<number | null>(null)
   const [otherIncomeEvidenceNote, setOtherIncomeEvidenceNote] = useState('')
@@ -1481,6 +1722,8 @@ function App() {
     }
   }, [])
 
+  useEffect(() => subscribeDataChanged(setLastDataChange), [])
+
   const navigateTo = (path: string) => {
     window.history.pushState({}, '', path)
     setCurrentPath(path)
@@ -1531,13 +1774,26 @@ function App() {
       return
     }
 
-    if (item.resource_type === 'SALARY_PERIOD' && context.salary_period) {
-      const period = String(context.salary_period)
+    if (item.resource_type === 'SALARY_PERIOD' && (context.salary_period || item.resource_id)) {
+      const period = String(context.salary_period || item.resource_id)
       if (isBusinessAdminRole(currentUser?.role)) {
+        const isApprovalRequest = item.event_type === 'PAYROLL_APPROVAL_REQUESTED'
+        salaryPeriodTouchedRef.current = true
         setSalaryPeriod(period)
         setSalarySubTab('grid')
-        setSalaryNotificationEmployeeId(context.target_employee_id ? Number(context.target_employee_id) : null)
+        setSalaryNotificationEmployeeId(
+          isApprovalRequest ? null : context.target_employee_id ? Number(context.target_employee_id) : null,
+        )
+        setSalaryApprovalNotificationFocus(
+          isApprovalRequest ? { period, notificationId: item.id } : null,
+        )
         navigateTo('/admin/salary-matrix')
+        if (isApprovalRequest) {
+          // Refresh the workflow independently from the salary grid. This is
+          // important when the user opens an approval notification while the
+          // grid is still showing data/state from another salary period.
+          void refreshSalaryApproval(period)
+        }
       } else {
         setMyPayslipPeriod(period)
         navigateTo(currentUser?.role === 'HR_ADMIN' ? '/hr/my-payslip' : '/user/my-payslip')
@@ -1567,6 +1823,51 @@ function App() {
     navigateTo(path)
   }
 
+  useEffect(() => {
+    const focusRequest = salaryApprovalNotificationFocus
+    if (
+      !focusRequest ||
+      currentPath !== '/admin/salary-matrix' ||
+      salaryPeriod !== focusRequest.period
+    ) {
+      return
+    }
+
+    let attempt = 0
+    let timerId: number | undefined
+
+    const focusApprovalAction = () => {
+      attempt += 1
+      const approvalButton = document.getElementById('salary-approve-publish-button')
+      const target = approvalButton || document.getElementById('salary-approval-actions')
+
+      if (target) {
+        target.scrollIntoView({
+          behavior: attempt === 1 ? 'smooth' : 'auto',
+          block: 'center',
+        })
+        if (approvalButton instanceof HTMLButtonElement) {
+          approvalButton.focus({ preventScroll: true })
+        }
+      }
+
+      // Salary data and approval state load asynchronously; keep the requested destination stable.
+      if (attempt < 12) {
+        timerId = window.setTimeout(focusApprovalAction, 250)
+        return
+      }
+
+      setSalaryApprovalNotificationFocus((current) =>
+        current?.notificationId === focusRequest.notificationId ? null : current,
+      )
+    }
+
+    timerId = window.setTimeout(focusApprovalAction, 100)
+    return () => {
+      if (timerId !== undefined) window.clearTimeout(timerId)
+    }
+  }, [currentPath, salaryApprovalNotificationFocus, salaryPeriod])
+
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -1583,6 +1884,13 @@ function App() {
         throw new Error(data.detail || 'Đăng nhập thất bại')
       }
       const data = await res.json()
+      if (rememberLogin) {
+        localStorage.setItem(REMEMBER_LOGIN_PREFERENCE_KEY, 'true')
+        localStorage.setItem(REMEMBER_LOGIN_USERNAME_KEY, loginUsername.trim())
+      } else {
+        localStorage.removeItem(REMEMBER_LOGIN_PREFERENCE_KEY)
+        localStorage.removeItem(REMEMBER_LOGIN_USERNAME_KEY)
+      }
       setToken(data.access_token)
       setCurrentUser(data)
       const loginTab = isBusinessAdminRole(data.role) || data.role === 'HR_ADMIN' ? 'dashboard' : 'personal-dashboard'
@@ -1597,6 +1905,7 @@ function App() {
       else navigateTo('/user/dashboard')
       const roleLabels: Record<string, string> = {
         ADMIN: 'Kế toán trưởng',
+        DIRECTOR: 'GIÁM ĐỐC',
         HR_ADMIN: 'Admin vận hành',
         IT_ADMIN: 'Quản trị hệ thống cấp cao',
         USER: 'Nhân viên',
@@ -1616,7 +1925,8 @@ function App() {
     setSalarySubTab('grid')
     setMyPayslipPeriod('')
     setMyPayslipPeriods([])
-    setLoginUsername('')
+    salaryPeriodTouchedRef.current = false
+    setLoginUsername(rememberLogin ? localStorage.getItem(REMEMBER_LOGIN_USERNAME_KEY) || '' : '')
     setLoginPassword('')
     navigateTo('/login')
     setMessage('Đã đăng xuất khỏi hệ thống.')
@@ -1625,7 +1935,7 @@ function App() {
   // Sync tab with path
   useEffect(() => {
     if (!currentUser) {
-      if (currentPath !== '/login') {
+      if (currentPath !== '/login' && currentPath !== '/onboarding' && currentPath !== '/offboarding') {
         window.setTimeout(() => navigateTo('/login'), 0)
       }
       return
@@ -1644,6 +1954,10 @@ function App() {
         setActiveTab('employees')
       } else if (currentPath === '/admin/departments' || currentPath === '/admin/departments/chart') {
         setActiveTab('departments')
+      } else if (currentPath === '/admin/onboarding') {
+        setActiveTab('onboarding')
+      } else if (currentPath.startsWith('/admin/offboarding')) {
+        setActiveTab('offboarding')
       } else if (currentPath === '/admin/timesheets') {
         setActiveTab('timesheets')
       } else if (currentPath === '/admin/time-off') {
@@ -1656,10 +1970,12 @@ function App() {
       } else if (currentPath === '/admin/commission') {
         navigateTo('/admin/salary-matrix')
         setSalarySubTab('commission')
-      } else if (currentUser.role === 'ADMIN' && currentPath === '/admin/my-payslip') {
+      } else if ((currentUser.role === 'ADMIN' || currentUser.role === 'DIRECTOR') && currentPath === '/admin/my-payslip') {
         setActiveTab('my-payslip')
-      } else if (currentUser.role === 'ADMIN' && currentPath === '/admin/my-attendance') {
+      } else if ((currentUser.role === 'ADMIN' || currentUser.role === 'DIRECTOR') && currentPath === '/admin/my-attendance') {
         setActiveTab('my-attendance')
+      } else if (currentPath === '/admin/my-account') {
+        setActiveTab('my-account')
       } else if (
         currentPath === '/'
         || currentPath.startsWith('/user')
@@ -1672,15 +1988,14 @@ function App() {
       if (currentPath === '/hr/dashboard') setActiveTab('dashboard')
       else if (currentPath === '/hr/employees') setActiveTab('employees')
       else if (currentPath === '/hr/departments' || currentPath === '/hr/departments/chart') setActiveTab('departments')
+      else if (currentPath === '/hr/onboarding') setActiveTab('onboarding')
+      else if (currentPath.startsWith('/hr/offboarding')) setActiveTab('offboarding')
       else if (currentPath === '/hr/timesheets') setActiveTab('timesheets')
       else if (currentPath === '/hr/time-off') setActiveTab('time-off')
       else if (currentPath === '/hr/export') setActiveTab('export')
       else if (currentPath === '/hr/my-payslip') setActiveTab('my-payslip')
       else if (currentPath === '/hr/my-attendance') setActiveTab('my-attendance')
-      else if (currentPath === '/hr/my-account') {
-        navigateTo('/hr/dashboard')
-        setActiveTab('dashboard')
-      }
+      else if (currentPath === '/hr/my-account') setActiveTab('my-account')
       else navigateTo('/hr/dashboard')
     } else {
       const prefix = '/user'
@@ -1692,14 +2007,16 @@ function App() {
         setActiveTab('my-attendance')
       } else if (currentPath === `${prefix}/time-off` || currentPath === '/user/time-off') {
         setActiveTab('time-off')
+      } else if (currentPath.startsWith(`${prefix}/offboarding`)) {
+        navigateTo(`${prefix}/dashboard`)
+        setActiveTab('personal-dashboard')
       } else if (currentPath === `${prefix}/my-timesheet` || currentPath === '/user/my-timesheet') {
         navigateTo(`${prefix}/my-attendance`)
         setActiveTab('my-attendance')
       } else if (currentPath === `${prefix}/my-held-bonuses` || currentPath === '/user/my-held-bonuses') {
         setActiveTab('my-held-bonuses')
       } else if (currentPath === `${prefix}/my-account` || currentPath === '/user/my-account') {
-        navigateTo(`${prefix}/dashboard`)
-        setActiveTab('personal-dashboard')
+        setActiveTab('my-account')
       } else if (currentPath === '/' || currentPath.startsWith('/admin') || currentPath.startsWith('/hr') || currentPath === '/login') {
         navigateTo(`${prefix}/dashboard`)
       }
@@ -1713,6 +2030,8 @@ function App() {
       else if (key === 'salary') navigateTo('/admin/salary-matrix')
       else if (key === 'employees') navigateTo('/admin/employees')
       else if (key === 'departments') navigateTo('/admin/departments')
+      else if (key === 'onboarding') navigateTo('/admin/onboarding')
+      else if (key === 'offboarding') navigateTo('/admin/offboarding')
       else if (key === 'timesheets') navigateTo('/admin/timesheets')
       else if (key === 'time-off') navigateTo('/admin/time-off')
       else if (key === 'import') {
@@ -1721,19 +2040,23 @@ function App() {
       }
       else if (key === 'export') navigateTo('/admin/export')
       else if (key === 'commission') navigateTo('/admin/commission')
-      else if (currentUser?.role === 'ADMIN' && key === 'my-payslip') navigateTo('/admin/my-payslip')
-      else if (currentUser?.role === 'ADMIN' && key === 'my-attendance') navigateTo('/admin/my-attendance')
+      else if ((currentUser?.role === 'ADMIN' || currentUser?.role === 'DIRECTOR') && key === 'my-payslip') navigateTo('/admin/my-payslip')
+      else if ((currentUser?.role === 'ADMIN' || currentUser?.role === 'DIRECTOR') && key === 'my-attendance') navigateTo('/admin/my-attendance')
+      else if (key === 'my-account') navigateTo('/admin/my-account')
       else if (currentUser?.role === 'IT_ADMIN' && key === 'it-backups') navigateTo('/it/backups')
       else if (currentUser?.role === 'IT_ADMIN' && key === 'it-audit') navigateTo('/it/audit')
     } else if (currentUser?.role === 'HR_ADMIN') {
       if (key === 'dashboard') navigateTo('/hr/dashboard')
       else if (key === 'employees') navigateTo('/hr/employees')
       else if (key === 'departments') navigateTo('/hr/departments')
+      else if (key === 'onboarding') navigateTo('/hr/onboarding')
+      else if (key === 'offboarding') navigateTo('/hr/offboarding')
       else if (key === 'timesheets') navigateTo('/hr/timesheets')
       else if (key === 'time-off') navigateTo('/hr/time-off')
       else if (key === 'export') navigateTo('/hr/export')
       else if (key === 'my-payslip') navigateTo('/hr/my-payslip')
       else if (key === 'my-attendance') navigateTo('/hr/my-attendance')
+      else if (key === 'my-account') navigateTo('/hr/my-account')
     } else {
       const prefix = '/user'
       if (key === 'personal-dashboard') navigateTo(`${prefix}/dashboard`)
@@ -1741,39 +2064,92 @@ function App() {
       else if (key === 'my-payslip') navigateTo(`${prefix}/my-payslip`)
       else if (key === 'my-attendance') navigateTo(`${prefix}/my-attendance`)
       else if (key === 'my-held-bonuses') navigateTo(`${prefix}/my-held-bonuses`)
+      else if (key === 'my-account') navigateTo(`${prefix}/my-account`)
     }
   }
 
   const dynamicTabs = useMemo(() => {
     if (!currentUser) return []
     if (currentUser.role === 'IT_ADMIN') return itNavigationTabs
-    if (currentUser.role === 'ADMIN') return chiefAccountantNavigationTabs
+    if (currentUser.role === 'ADMIN' || currentUser.role === 'DIRECTOR') return chiefAccountantNavigationTabs
     if (currentUser.role === 'HR_ADMIN') return hrNavigationTabs
     return personalNavigationTabs
   }, [currentUser])
 
-  const isPeriodPublished = useMemo(() => {
-    if (salaryInputs.length === 0) return false
-    return salaryInputs.some((input: any) => input.is_published)
-  }, [salaryInputs])
-
-  async function togglePublishSalaryPeriod() {
+  async function confirmSalaryPeriod() {
+    if (Object.keys(editedInputs).length > 0) {
+      setMessage('Hãy lưu các thay đổi bảng lương vào DB trước khi xác nhận.')
+      return
+    }
+    const accepted = await confirm({
+      title: `Xác nhận bảng lương ${salaryPeriod}`,
+      message: 'Bước này chỉ xác nhận số liệu bảng lương là chính xác, chưa phát hành phiếu lương. Sau đó bạn cần gửi yêu cầu phê duyệt. Tiếp tục?',
+      confirmLabel: 'Xác nhận số liệu',
+    })
+    if (!accepted) return
     setLoading(true)
     try {
-      const publishVal = !isPeriodPublished
-      const response = await apiRequest('/api/salary/publish', {
+      const response = await apiRequest('/api/salary/approval/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          period: salaryPeriod,
-          is_published: publishVal
-        })
+        body: JSON.stringify({ period: salaryPeriod }),
       })
-      const result = await response.json()
-      setMessage(`Đã ${publishVal ? 'phát hành' : 'thu hồi'} phiếu lương tháng ${salaryPeriod} (Số lượng: ${result.published_count}).`)
+      const result = await response.json() as SalaryApprovalState & { input_count: number }
+      setSalaryApproval(result)
       await loadSalaryData()
+      setMessage(`Đã xác nhận số liệu bảng lương tháng ${salaryPeriod}. Phiếu lương chưa phát hành; nút Yêu cầu phê duyệt đã sẵn sàng.`)
     } catch (error) {
-      setMessage(`Thao tác phát hành thất bại: ${(error as Error).message}`)
+      setMessage(`Xác nhận bảng lương thất bại: ${(error as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function requestSalaryApproval() {
+    const accepted = await confirm({
+      title: `Gửi yêu cầu phê duyệt bảng lương ${salaryPeriod}`,
+      message: 'Yêu cầu sẽ được gửi tới hai Giám đốc và IT_ADMIN. Phiếu lương chỉ phát hành sau khi một người có thẩm quyền phê duyệt.',
+      confirmLabel: 'Gửi yêu cầu',
+    })
+    if (!accepted) return
+    setLoading(true)
+    try {
+      const response = await apiRequest('/api/salary/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period: salaryPeriod }),
+      })
+      const result = await response.json() as SalaryApprovalState & { notified_count: number }
+      setSalaryApproval(result)
+      setMessage(`Đã gửi yêu cầu phê duyệt tới ${result.notified_count} tài khoản Giám đốc/IT cho bảng lương tháng ${salaryPeriod}.`)
+      await loadSalaryPeriods()
+    } catch (error) {
+      setMessage(`Gửi yêu cầu phê duyệt thất bại: ${(error as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function approveSalaryPeriod() {
+    const accepted = await confirm({
+      title: `Phê duyệt bảng lương ${salaryPeriod}`,
+      message: 'Sau khi phê duyệt, hệ thống sẽ tự động phát hành phiếu lương và gửi thông báo đến nhân viên. Tiếp tục?',
+      confirmLabel: 'Phê duyệt & phát hành',
+    })
+    if (!accepted) return
+    setLoading(true)
+    try {
+      const response = await apiRequest('/api/salary/approval/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period: salaryPeriod }),
+      })
+      const result = await response.json() as SalaryApprovalState & { published_count: number }
+      setSalaryApproval(result)
+      await Promise.all([loadSalaryData(), loadSalaryPeriods()])
+      setMessage(`Đã phê duyệt và tự động phát hành ${result.published_count} phiếu lương tháng ${salaryPeriod}. Nhân viên đã nhận thông báo.`)
+    } catch (error) {
+      setMessage(`Phê duyệt bảng lương thất bại: ${(error as Error).message}`)
     } finally {
       setLoading(false)
     }
@@ -1893,7 +2269,7 @@ function App() {
 <style>
   @page { size: A4; margin: 12mm; }
   * { box-sizing: border-box; }
-  body { margin: 0; color: #172033; font-family: Roboto, Arial, sans-serif; font-size: 10.5pt; line-height: 1.42; }
+  body { margin: 0; color: #172033; font-family: Roboto, "Segoe UI", Arial, sans-serif; font-size: 10.5pt; line-height: 1.42; }
   .payslip { border-top: 4px solid #163b66; }
   .header { display: flex; justify-content: space-between; gap: 18px; padding: 14px 0 16px; border-bottom: 1px solid #dbe3ed; }
   .brand { display: flex; align-items: center; gap: 12px; }
@@ -2110,6 +2486,33 @@ function App() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [employeeSearch, setEmployeeSearch] = useState('')
+  const [employeeDepartmentFilter, setEmployeeDepartmentFilter] = useState('all')
+  const [employeeStatusFilter, setEmployeeStatusFilter] = useState<EmployeeDirectoryStatusFilter>('all')
+  const [employeeTypeFilter, setEmployeeTypeFilter] = useState('all')
+  const [employeeDirectoryPage, setEmployeeDirectoryPage] = useState(1)
+  const employeeDepartmentOptions = useMemo(
+    () => Array.from(new Set(employees.map((employee) => employee.department_name || employee.department_code || 'N/A')))
+      .sort((a, b) => a.localeCompare(b, 'vi')),
+    [employees],
+  )
+  const filteredEmployeeDirectoryRows = useMemo(
+    () => filterEmployeeDirectoryRows(employees, {
+      search: employeeSearch,
+      department: employeeDepartmentFilter,
+      status: employeeStatusFilter,
+      employeeType: employeeTypeFilter,
+    }),
+    [employees, employeeSearch, employeeDepartmentFilter, employeeStatusFilter, employeeTypeFilter],
+  )
+  const employeeDirectoryPagination = useMemo(
+    () => paginateEmployeeDirectoryRows(filteredEmployeeDirectoryRows, employeeDirectoryPage),
+    [filteredEmployeeDirectoryRows, employeeDirectoryPage],
+  )
+  useEffect(() => {
+    if (employeeDirectoryPage !== employeeDirectoryPagination.currentPage) {
+      setEmployeeDirectoryPage(employeeDirectoryPagination.currentPage)
+    }
+  }, [employeeDirectoryPage, employeeDirectoryPagination.currentPage])
   const [employeeForm, setEmployeeForm] = useState<EmployeeFormState>(EMPTY_EMPLOYEE_FORM)
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false)
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null)
@@ -2143,6 +2546,8 @@ function App() {
     password: '',
     start_date: '',
     resignation_period: '',
+    last_working_date: '',
+    last_pay_date: '',
     bonus_coefficient: '0',
     meal_allowance_free: '1200000',
     meal_allowance_tax: '0',
@@ -2154,23 +2559,84 @@ function App() {
     bonus_14: '0',
   })
 
-  const [periodStart, setPeriodStart] = useState('2026-04-23')
-  const [periodEnd, setPeriodEnd] = useState('2026-05-22')
+  const [periodStart, setPeriodStart] = useState(DEFAULT_TIMESHEET_RANGE.start)
+  const [periodEnd, setPeriodEnd] = useState(DEFAULT_TIMESHEET_RANGE.end)
   const [dashboardKpi, setDashboardKpi] = useState<DashboardKpi | null>(null)
+  const [dashboardTrendOpen, setDashboardTrendOpen] = useState(false)
   const [autoRefreshKpi, setAutoRefreshKpi] = useState(false)
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState('30')
+
+  useEffect(() => {
+    if (!dashboardTrendOpen) return
+    const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDashboardTrendOpen(false)
+    }
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [dashboardTrendOpen])
 
   const [timesheetGridRows, setTimesheetGridRows] = useState<TimesheetGridRow[]>([])
   const [timesheetDayColumns, setTimesheetDayColumns] = useState<TimesheetDayColumn[]>([])
   const [timesheetIsLocked, setTimesheetIsLocked] = useState(false)
+  const [timesheetDefaultPeriodResolved, setTimesheetDefaultPeriodResolved] = useState(false)
   const [timesheetEmployeeFilter, setTimesheetEmployeeFilter] = useState('')
   const [timesheetDepartmentFilter, setTimesheetDepartmentFilter] = useState('all')
-  const [timesheetAbnormalFilter, setTimesheetAbnormalFilter] = useState<'all' | 'abnormal' | 'normal'>('all')
+  const [timesheetAbnormalFilter, setTimesheetAbnormalFilter] = useState<TimesheetAbnormalFilter>('all')
+  const [timesheetSymbolFilter, setTimesheetSymbolFilter] = useState('all')
+  const [timesheetPage, setTimesheetPage] = useState(1)
+
+  const timesheetDepartmentOptions = useMemo(
+    () => Array.from(new Set(timesheetGridRows.map((row) => row.department_name ?? 'N/A'))).sort((a, b) => a.localeCompare(b, 'vi')),
+    [timesheetGridRows],
+  )
+  const filteredTimesheetGridRows = useMemo(
+    () => filterTimesheetRows(timesheetGridRows, {
+      search: timesheetEmployeeFilter,
+      department: timesheetDepartmentFilter,
+      abnormal: timesheetAbnormalFilter,
+      symbol: timesheetSymbolFilter,
+    }),
+    [timesheetGridRows, timesheetEmployeeFilter, timesheetDepartmentFilter, timesheetAbnormalFilter, timesheetSymbolFilter],
+  )
+  const timesheetPagination = useMemo(
+    () => paginateTimesheetRows(filteredTimesheetGridRows, timesheetPage, TIMESHEET_PAGE_SIZE),
+    [filteredTimesheetGridRows, timesheetPage],
+  )
+
+  useEffect(() => {
+    if (timesheetPage !== timesheetPagination.currentPage) {
+      setTimesheetPage(timesheetPagination.currentPage)
+    }
+  }, [timesheetPage, timesheetPagination.currentPage])
 
 
   const [overrideLogs, setOverrideLogs] = useState<OverrideLog[]>([])
   const [overrideHistoryEmployeeId, setOverrideHistoryEmployeeId] = useState('')
   const [overrideHistoryLimit, setOverrideHistoryLimit] = useState('200')
+  const [overrideHistoryOpen, setOverrideHistoryOpen] = useState(false)
+
+  useEffect(() => {
+    if (!overrideHistoryOpen) return
+    const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOverrideHistoryOpen(false)
+    }
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [overrideHistoryOpen])
+
+  useEffect(() => {
+    if (activeTab !== 'timesheets') setOverrideHistoryOpen(false)
+  }, [activeTab])
 
 
   const isShowingParsedImportPreview = importPreview.length > 0
@@ -2383,6 +2849,7 @@ function App() {
       }
       throw new Error(errMsg)
     }
+    notifyDataChanged(`${apiBase}${path}`, init?.method)
     return response
   }
 
@@ -2879,7 +3346,7 @@ function App() {
   }
 
   async function loadDepartments() {
-    if (!['ADMIN', 'HR_ADMIN', 'IT_ADMIN'].includes(currentUser?.role || '')) return
+    if (!['ADMIN', 'DIRECTOR', 'HR_ADMIN', 'IT_ADMIN'].includes(currentUser?.role || '')) return
     try {
       const response = await apiRequest(currentUser?.role === 'HR_ADMIN' ? '/api/hr/departments' : '/api/departments')
       const payload = await response.json()
@@ -2890,13 +3357,11 @@ function App() {
   }
 
   async function loadEmployees() {
-    if (!['ADMIN', 'HR_ADMIN', 'IT_ADMIN'].includes(currentUser?.role || '')) return
+    if (!['ADMIN', 'DIRECTOR', 'HR_ADMIN', 'IT_ADMIN'].includes(currentUser?.role || '')) return
     setLoading(true)
     try {
-      const query = employeeSearch.trim()
       const baseEndpoint = currentUser?.role === 'HR_ADMIN' ? '/api/hr/employees' : '/api/employees'
-      const endpoint = query ? `${baseEndpoint}?q=${encodeURIComponent(query)}` : baseEndpoint
-      const response = await apiRequest(endpoint)
+      const response = await apiRequest(baseEndpoint)
       const payload = (await response.json()) as Employee[]
       setEmployees(payload)
       loadDepartments()
@@ -2933,6 +3398,14 @@ function App() {
           other_allowance: Number(employeeForm.other_allowance),
           dependents_count: Number(employeeForm.dependents_count),
           bonus_coefficient: Number(employeeForm.bonus_coefficient),
+          contract_type: employeeForm.contract_type || null,
+          contract_sign_date: employeeForm.contract_sign_date || null,
+          contract_start_date: isFixedTermEmployeeContract(employeeForm.contract_type)
+            ? employeeForm.contract_start_date || null
+            : null,
+          contract_end_date: isFixedTermEmployeeContract(employeeForm.contract_type)
+            ? employeeForm.contract_end_date || null
+            : null,
           username: employeeForm.username.trim() || null,
           password: employeeForm.password.trim() || null,
         }),
@@ -2981,6 +3454,8 @@ function App() {
       password: '',
       start_date: employee.start_date ?? '',
       resignation_period: employee.resignation_period ?? '',
+      last_working_date: employee.last_working_date ?? '',
+      last_pay_date: employee.last_pay_date ?? '',
       bonus_coefficient: String(employee.bonus_coefficient ?? 0),
       meal_allowance_free: String(inp?.meal_allowance_free ?? monthlyDefaults.meal_allowance_free),
       meal_allowance_tax: String(inp?.meal_allowance_tax ?? monthlyDefaults.meal_allowance_tax),
@@ -3026,6 +3501,8 @@ function App() {
           password: editEmployeeForm.password || null,
           start_date: editEmployeeForm.start_date || null,
           resignation_period: editEmployeeForm.resignation_period || null,
+          last_working_date: editEmployeeForm.last_working_date || null,
+          last_pay_date: editEmployeeForm.last_pay_date || null,
         }),
       })
 
@@ -3079,7 +3556,7 @@ function App() {
         body: formData,
       })
       const updatedEmp = await response.json()
-      setDetailEmployee(updatedEmp)
+      setDetailEmployee(employeeWithDerivedUsername(updatedEmp))
       setMessage(`Upload ${type.toUpperCase()} thành công.`)
       await loadEmployees()
     } catch (error) {
@@ -3103,7 +3580,7 @@ function App() {
         body: JSON.stringify({ url, doc_type: type }),
       })
       const updatedEmp = await response.json()
-      setDetailEmployee(updatedEmp)
+      setDetailEmployee(employeeWithDerivedUsername(updatedEmp))
       setMessage(`Xóa tài liệu thành công.`)
       await loadEmployees()
     } catch (error) {
@@ -3143,12 +3620,13 @@ function App() {
     setLoading(true)
     setEmployeeError(null)
     try {
+      const accountPassword = detailEmployeePassword.trim()
+      const shouldSaveLoginAccount = Boolean(detailEmployee.account_role || accountPassword)
       await apiRequest(`/api/employees/${detailEmployee.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           machine_employee_id: detailEmployee.machine_employee_id,
-          biometric_id: detailEmployee.biometric_id || null,
           full_name: detailEmployee.full_name,
           notion_name: detailEmployee.notion_name,
           department_code: detailEmployee.department_code,
@@ -3181,13 +3659,23 @@ function App() {
           company_email: detailEmployee.company_email || null,
           personal_email: detailEmployee.personal_email || null,
           notes: detailEmployee.notes || null,
-          username: detailEmployee.username || null,
-          password: detailEmployeePassword.trim() || null,
+          username: shouldSaveLoginAccount ? detailEmployee.username || null : null,
+          password: accountPassword || null,
           start_date: detailEmployee.start_date || null,
+          contract_type: detailEmployee.contract_type || null,
+          contract_sign_date: detailEmployee.contract_sign_date || null,
+          contract_start_date: isFixedTermEmployeeContract(detailEmployee.contract_type)
+            ? detailEmployee.contract_start_date || null
+            : null,
+          contract_end_date: isFixedTermEmployeeContract(detailEmployee.contract_type)
+            ? detailEmployee.contract_end_date || null
+            : null,
           resignation_period: detailEmployee.resignation_period || null,
+          last_working_date: detailEmployee.last_working_date || null,
+          last_pay_date: detailEmployee.last_pay_date || null,
         }),
       })
-      await loadEmployees()
+      await Promise.all([loadEmployees(), loadSalaryData()])
       setMessage('Cập nhật nhân viên thành công.')
       setDetailEmployeePassword('')
       setDetailEmployee(null)
@@ -3229,6 +3717,8 @@ function App() {
     let actual  = 0   // Σ(Lương_HĐLĐ / 26 * Ngày_công_thực)
 
     for (const emp of salaryEmployees) {
+      // TRAINEE belongs to Khối C and is stipend-only outside payroll.
+      if (emp.employee_type === 'TRAINEE') continue
       const input  = salaryInputs.find(x => x.employee_id === emp.id)
       const edited = editedInputs[emp.id] || {}
 
@@ -3283,29 +3773,138 @@ function App() {
   }, [salaryEmployees, salaryInputs, editedInputs, salaryPeriod, salaryPolicy])
 
   // Salary / Payroll Handlers
+  async function loadSalaryPeriods() {
+    if (!isBusinessAdminRole(currentUser?.role)) return
+    try {
+      const response = await apiRequest('/api/salary/periods')
+      const payload = await response.json()
+      const validApprovalStatuses = new Set<SalaryApprovalStatus>(['DRAFT', 'CONFIRMED', 'PENDING_APPROVAL', 'APPROVED'])
+      const periods: SalaryPeriodItem[] = Array.isArray(payload)
+        ? payload
+          .filter((item) => typeof item?.period === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(item.period))
+          .map((item) => ({
+            period: String(item.period),
+            is_published: Boolean(item.is_published),
+            input_count: Number(item.input_count || 0),
+            approval_status: validApprovalStatuses.has(item.approval_status as SalaryApprovalStatus)
+              ? item.approval_status as SalaryApprovalStatus
+              : (item.is_published ? 'APPROVED' : 'DRAFT'),
+          }))
+        : []
+      setSalaryPeriods(periods)
+      if (salaryPeriodTouchedRef.current) return
+      const current = currentMonthPeriod()
+      const currentExists = periods.some((item) => item.period === current)
+      const publishedPeriods = periods.filter((item) => item.is_published).map((item) => item.period)
+      const fallbackPool = publishedPeriods.length > 0 ? publishedPeriods : periods.map((item) => item.period)
+      const fallback = closestMonthPeriod(fallbackPool, current)
+      // Keep the current draft month selected when it already has payroll
+      // inputs. Falling back to the latest published month made August open
+      // on July data until the user switched months manually.
+      setSalaryPeriod(currentExists ? current : (fallback || current))
+    } catch (error) {
+      setMessage(`Không tải được danh sách kỳ lương: ${(error as Error).message}`)
+    }
+  }
+
+  function salaryApprovalFallback(period: string): SalaryApprovalState {
+    const periodInfo = salaryPeriods.find((item) => item.period === period)
+    // is_published describes salary input visibility, not the approval
+    // workflow. A confirmed period can already contain published inputs while
+    // it is still waiting for Director/IT approval, so approval_status must
+    // always take precedence when it is available.
+    const fallbackStatus: SalaryApprovalStatus = periodInfo?.approval_status
+      ?? (periodInfo?.is_published ? 'APPROVED' : 'DRAFT')
+    return {
+      period,
+      status: fallbackStatus,
+      confirmed_by_user_id: null,
+      confirmed_at: null,
+      requested_by_user_id: null,
+      requested_at: null,
+      approved_by_user_id: null,
+      approved_at: null,
+    }
+  }
+
+  async function refreshSalaryApproval(
+    period: string = salaryPeriod,
+    shouldApply: () => boolean = () => true,
+  ) {
+    try {
+      const approvalRes = await apiRequest(`/api/salary/approval?period=${period}`)
+      const approvalData = await approvalRes.json() as SalaryApprovalState
+      if (shouldApply()) {
+        setSalaryApproval(approvalData)
+        setIsSalaryConfirmed(approvalData.status !== 'DRAFT')
+      }
+      return approvalData
+    } catch (approvalError) {
+      // Approval workflow is supplementary metadata. A deployment with an
+      // unapplied approval migration must never hide the core salary data.
+      const fallback = salaryApprovalFallback(period)
+      if (shouldApply()) {
+        setSalaryApproval(fallback)
+        setIsSalaryConfirmed(fallback.status !== 'DRAFT')
+      }
+      console.warn('Salary approval workflow is temporarily unavailable.', approvalError)
+      return fallback
+    }
+  }
+
   async function loadSalaryData() {
     if (!isBusinessAdminRole(currentUser?.role)) return
+    const requestedPeriod = salaryPeriod
+    const requestId = ++salaryLoadSequenceRef.current
+    const isCurrentRequest = () => requestId === salaryLoadSequenceRef.current
     setLoading(true)
     try {
-      const [empRes, inputRes, policyRes, historyRes] = await Promise.all([
-        apiRequest(`/api/salary/employees?period=${salaryPeriod}`),
-        apiRequest(`/api/salary/inputs?period=${salaryPeriod}`),
-        apiRequest(`/api/salary/policy?period=${salaryPeriod}`),
-        apiRequest('/api/salary/policies'),
+      const [employeesData, inputData, policyResult, policyHistoryResult] = await Promise.all([
+        apiRequest(`/api/salary/employees?period=${requestedPeriod}`).then(response => response.json()),
+        apiRequest(`/api/salary/inputs?period=${requestedPeriod}`).then(response => response.json()),
+        apiRequest(`/api/salary/policy?period=${requestedPeriod}`)
+          .then(response => response.json())
+          .catch(error => {
+            console.warn(`Không tải được chính sách lương tháng ${requestedPeriod}.`, error)
+            return null
+          }),
+        apiRequest('/api/salary/policies')
+          .then(response => response.json())
+          .catch(error => {
+            console.warn('Không tải được lịch sử chính sách lương.', error)
+            return null
+          }),
       ])
-      setSalaryEmployees(await empRes.json())
-      setSalaryInputs(await inputRes.json())
-      const policyData = await policyRes.json()
-      setSalaryPolicy(policyData.policy || DEFAULT_SALARY_POLICY)
-      setSalaryPolicyHistory(await historyRes.json())
+      if (!isCurrentRequest()) return
+
+      await refreshSalaryApproval(requestedPeriod, isCurrentRequest)
+      if (!isCurrentRequest()) return
+
+      setSalaryEmployees(employeesData)
+      setSalaryInputs(inputData)
+      if (policyResult?.policy) {
+        setSalaryPolicy(policyResult.policy)
+      }
+      if (Array.isArray(policyHistoryResult)) {
+        setSalaryPolicyHistory(policyHistoryResult)
+      }
       
       setEditedInputs({})
       setEditingSalaryEmployeeId(null)
-      setMessage(`Đã tải thông tin bảng lương tháng ${salaryPeriod}.`)
+      setMessage(`Đã tải thông tin bảng lương tháng ${requestedPeriod}.`)
     } catch (error) {
-      setMessage(`Không tải được thông tin bảng lương: ${(error as Error).message}`)
+      if (isCurrentRequest()) {
+        // Never leave a previous month's rows visible below the newly selected
+        // period label when either core payroll request fails.
+        setSalaryEmployees([])
+        setSalaryInputs([])
+        setEditedInputs({})
+        setMessage(`Không tải được thông tin bảng lương: ${(error as Error).message}`)
+      }
     } finally {
-      setLoading(false)
+      if (isCurrentRequest()) {
+        setLoading(false)
+      }
     }
   }
 
@@ -3505,7 +4104,8 @@ function App() {
 
   async function saveMonthlyInputs() {
     const pendingOtherIncomeEmployee = salaryEmployees.find((employee) =>
-      Object.prototype.hasOwnProperty.call(editedInputs[employee.id] || {}, 'other_income'),
+      employee.employee_type !== 'TRAINEE'
+      && Object.prototype.hasOwnProperty.call(editedInputs[employee.id] || {}, 'other_income'),
     )
     if (pendingOtherIncomeEmployee) {
       const existingInput = salaryInputs.find((item) => Number(item.employee_id) === Number(pendingOtherIncomeEmployee.id))
@@ -3518,6 +4118,7 @@ function App() {
       const payload: any[] = []
       const undoEntries: Array<{ employeeId: number; previousInput: any | null }> = []
       for (const emp of salaryEmployees) {
+        if (emp.employee_type === 'TRAINEE') continue
         const existingInput = salaryInputs.find(x => x.employee_id === emp.id)
         const edited = editedInputs[emp.id] || {}
 
@@ -3582,8 +4183,8 @@ function App() {
       setMessage('Không có lần lưu nào trong tháng hiện tại để hoàn tác.')
       return
     }
-    if (isSalaryLocked || isSalaryConfirmed) {
-      setMessage('Bảng lương đã khóa hoặc xác nhận; không thể hoàn tác tại đây.')
+    if (isSalaryLocked) {
+      setMessage('Bảng lương đang khóa thủ công; hãy mở khóa trước khi hoàn tác.')
       return
     }
     const accepted = await confirm({
@@ -3733,6 +4334,8 @@ function App() {
     const dataRows: (string | number | null)[][] = []
 
     for (const emp of salaryEmployees) {
+      // Khối C chỉ theo dõi thực tập sinh, không xuất chuyển khoản lương.
+      if (emp.employee_type === 'TRAINEE') continue
       // Lấy input gốc từ DB (nếu có)
       const dbInput = salaryInputs.find((inp: any) => inp.employee_id === emp.id) || {}
       // Merge với các chỉnh sửa chưa lưu (editedInputs)
@@ -3789,7 +4392,7 @@ function App() {
     }
 
     if (dataRows.length === 0) {
-      setMessage('⚠️ Không có nhân viên nào có lương cần chuyển khoản trong tháng này.')
+      setMessage('Không có nhân viên nào có lương cần chuyển khoản trong tháng này.')
       return
     }
 
@@ -3839,12 +4442,12 @@ function App() {
     const filename = `Payment_Salary_${salaryPeriod}.xlsx`
     XLSX.writeFile(wb, filename)
 
-    setMessage(`✅ Đã xuất file Payment chuyển khoản lương tháng ${salaryPeriod} — ${dataRows.length} nhân viên (${filename}).`)
+    setMessage(`Đã xuất file Payment chuyển khoản lương tháng ${salaryPeriod} — ${dataRows.length} nhân viên (${filename}).`)
   }
 
 
   async function loadTimesheets() {
-    if (!['ADMIN', 'HR_ADMIN', 'IT_ADMIN'].includes(currentUser?.role || '')) return
+    if (!['ADMIN', 'DIRECTOR', 'HR_ADMIN', 'IT_ADMIN'].includes(currentUser?.role || '')) return
     setLoading(true)
     try {
 
@@ -3853,37 +4456,11 @@ function App() {
 
       setTimesheetIsLocked(gridPayload.is_locked || false)
 
-      let filteredGrid = gridPayload.rows
-
-      if (timesheetEmployeeFilter.trim()) {
-        const filterLower = timesheetEmployeeFilter.trim().toLowerCase()
-        filteredGrid = filteredGrid.filter((row) => {
-          const employeeIdText = String(row.employee_id).toLowerCase()
-          const machineEmployeeIdText = String(row.machine_employee_id ?? '').toLowerCase()
-          const employeeNameText = String(row.full_name ?? '').toLowerCase()
-          return (
-            employeeIdText.includes(filterLower) ||
-            machineEmployeeIdText.includes(filterLower) ||
-            employeeNameText.includes(filterLower)
-          )
-        })
-      }
-
-      if (timesheetDepartmentFilter !== 'all') {
-        filteredGrid = filteredGrid.filter((row) => (row.department_name ?? 'N/A') === timesheetDepartmentFilter)
-      }
-
-      if (timesheetAbnormalFilter === 'abnormal') {
-        filteredGrid = filteredGrid.filter((row) => row.abnormal_days > 0)
-      } else if (timesheetAbnormalFilter === 'normal') {
-        filteredGrid = filteredGrid.filter((row) => row.abnormal_days === 0)
-      }
-
-
       setTimesheetDayColumns(gridPayload.day_columns)
-      setTimesheetGridRows(filteredGrid)
+      setTimesheetGridRows(gridPayload.rows)
+      setTimesheetPage(1)
 
-      setMessage(`Đã tải ${filteredGrid.length} dòng lưới timesheet theo kỳ.`)
+      setMessage(`Đã tải ${gridPayload.rows.length} dòng lưới timesheet theo kỳ.`)
     } catch (error) {
       setMessage(`Không tải được timesheet: ${(error as Error).message}`)
     } finally {
@@ -3939,7 +4516,7 @@ function App() {
       }
 
       setTimesheetIsLocked(!timesheetIsLocked)
-      setMessage(`✅ Đã ${action.toLowerCase()} bảng công thành công!`)
+      setMessage(`Đã ${action.toLowerCase()} bảng công thành công!`)
     } catch (error) {
       setMessage(`${action} bảng công thất bại: ${(error as Error).message}`)
     } finally {
@@ -3962,11 +4539,20 @@ function App() {
 
     setLoading(true)
     try {
-      const payload = timesheetGridRows.map((row: any) => ({
+      const traineeEmployeeIds = new Set(
+        [...salaryEmployees, ...employees]
+          .filter((employee: any) => employee.employee_type === 'TRAINEE')
+          .map((employee: any) => Number(employee.id)),
+      )
+      const payload = timesheetGridRows
+        .filter((row: any) => !traineeEmployeeIds.has(Number(row.employee_id)))
+        .map((row: any) => ({
         employee_id: Number(row.employee_id),
         salary_period: derivedSalaryPeriod,
-        actual_working_days: Number(row.total_work_days || 0),
-      }))
+        actual_working_days: Number(
+          row.total_payroll_days ?? (Number(row.total_work_days || 0) + Number(row.paid_leave_days || 0)),
+        ),
+        }))
 
       const res = await apiRequest('/api/salary/inputs', {
         method: 'POST',
@@ -3979,7 +4565,7 @@ function App() {
         throw new Error(errData.detail || 'Lỗi khi đồng bộ lương')
       }
 
-      setMessage(`✅ Đã chốt công và đồng bộ thành công ${payload.length} nhân viên sang Bảng lương tháng ${derivedSalaryPeriod}!`)
+      setMessage(`Đã chốt công và đồng bộ thành công ${payload.length} nhân viên sang Bảng lương tháng ${derivedSalaryPeriod}!`)
     } catch (error) {
       setMessage(`Đồng bộ thất bại: ${(error as Error).message}`)
     } finally {
@@ -4003,7 +4589,7 @@ function App() {
   }
 
   async function loadOverrideHistory(options?: { silent?: boolean }) {
-    if (!['ADMIN', 'HR_ADMIN', 'IT_ADMIN'].includes(currentUser?.role || '')) return
+    if (!['ADMIN', 'DIRECTOR', 'HR_ADMIN', 'IT_ADMIN'].includes(currentUser?.role || '')) return
     const silent = Boolean(options?.silent)
     if (!silent) {
       setLoading(true)
@@ -4029,17 +4615,11 @@ function App() {
       }
     }
   }
-  async function exportDashboardKpi() {
-    const response = await apiRequest(`/api/export/kpi?period_start=${periodStart}&period_end=${periodEnd}`)
-    const blob = await response.blob()
-    const href = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = href
-    link.download = `kpi_${periodStart}_${periodEnd}.xlsx`
-    link.click()
-    URL.revokeObjectURL(href)
-    setMessage('Đã gửi yêu cầu export KPI Excel.')
-  }
+  useEffect(() => {
+    if (!isBusinessAdminRole(currentUser?.role)) return
+    void loadSalaryPeriods()
+  }, [token, currentUser?.role])
+
   useEffect(() => {
     if (activeTab !== 'dashboard') {
       return
@@ -4062,20 +4642,58 @@ function App() {
 
   useEffect(() => {
     if (activeTab !== 'timesheets') {
+      if (timesheetDefaultPeriodResolved) setTimesheetDefaultPeriodResolved(false)
       return
     }
+    if (timesheetDefaultPeriodResolved) return
+
+    let cancelled = false
+    const resolveDefaultTimesheetPeriod = async () => {
+      const currentRange = timesheetRangeForPeriod(currentMonthPeriod())
+      const previousRange = timesheetRangeForPeriod(shiftMonthPeriod(currentRange.period, -1))
+      let nextRange = previousRange
+
+      try {
+        const response = await apiRequest(
+          `/api/timesheets/grid?period_start=${currentRange.start}&period_end=${currentRange.end}`,
+        )
+        const payload = (await response.json()) as TimesheetGridResponse
+        if (payload.is_locked) nextRange = currentRange
+      } catch {
+        // Nếu chưa đọc được trạng thái kỳ hiện tại, kỳ trước vẫn là lựa chọn an toàn.
+      }
+
+      if (cancelled) return
+      setPeriodStart(nextRange.start)
+      setPeriodEnd(nextRange.end)
+      setTimesheetDefaultPeriodResolved(true)
+    }
+
+    void resolveDefaultTimesheetPeriod()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, timesheetDefaultPeriodResolved])
+
+  useEffect(() => {
+    if (activeTab !== 'timesheets' || !timesheetDefaultPeriodResolved) return
     void loadTimesheets()
-    void loadOverrideHistory({ silent: true })
-  }, [activeTab, periodStart, periodEnd])
+  }, [activeTab, periodStart, periodEnd, timesheetDefaultPeriodResolved])
 
   useEffect(() => {
     if (activeTab !== 'timesheets' || timesheetNotificationEmployeeId === null) return
-    if (!timesheetGridRows.some((row) => row.employee_id === timesheetNotificationEmployeeId)) return
+    const targetIndex = filteredTimesheetGridRows.findIndex((row) => row.employee_id === timesheetNotificationEmployeeId)
+    if (targetIndex < 0) return
+    const targetPage = Math.floor(targetIndex / TIMESHEET_PAGE_SIZE) + 1
+    if (timesheetPage !== targetPage) {
+      setTimesheetPage(targetPage)
+      return
+    }
     const timer = window.setTimeout(() => {
       document.getElementById(`timesheet-employee-${timesheetNotificationEmployeeId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 180)
     return () => window.clearTimeout(timer)
-  }, [activeTab, timesheetNotificationEmployeeId, timesheetGridRows])
+  }, [activeTab, timesheetNotificationEmployeeId, filteredTimesheetGridRows, timesheetPage])
 
   useEffect(() => {
     if (activeTab !== 'employees' && activeTab !== 'import' && activeTab !== 'timesheets') {
@@ -4091,7 +4709,7 @@ function App() {
     setDetailEmployeePassword('')
     setDetailEmployeeOriginalType((employee.employee_type || 'FULLTIME') as EmployeeType)
     setDetailEmployeeTypeEffectiveDate(new Date().toISOString().slice(0, 10))
-    setDetailEmployee(employee)
+    setDetailEmployee(employeeWithDerivedUsername(employee))
     setEmployeeNotificationId(null)
   }, [activeTab, currentUser?.role, employeeNotificationId, employees])
 
@@ -4101,6 +4719,51 @@ function App() {
     }
     void loadSalaryData()
   }, [activeTab, salaryPeriod])
+
+  // App-wide realtime refresh: successful write requests publish one batched
+  // data-change event. Refresh only the affected shared stores; the browser
+  // page itself is never reloaded.
+  useEffect(() => {
+    if (!token || !lastDataChange) return
+    const path = lastDataChange.path
+
+    if (/\/api\/(?:(?:hr\/)?employees|salary-decisions)(?:\/|$)/.test(path)) {
+      void loadEmployees()
+      if (isBusinessAdminRole(currentUser?.role)) void loadSalaryData()
+      return
+    }
+    if (/\/api\/salary(?:\/|$)/.test(path)) {
+      if (isBusinessAdminRole(currentUser?.role)) {
+        void loadSalaryData()
+        void loadSalaryPeriods()
+      }
+      return
+    }
+    if (/\/api\/(?:departments|hr\/departments)(?:\/|$)/.test(path)) {
+      void Promise.all([loadDepartments(), loadEmployees()])
+      return
+    }
+    if (/\/api\/(?:timesheets|attendance|import|holidays|time-off)(?:\/|$)/.test(path)) {
+      if (activeTab === 'timesheets') {
+        void loadTimesheets()
+        void loadOverrideHistory({ silent: true })
+      }
+      if (activeTab === 'dashboard') void loadDashboardKpi()
+      return
+    }
+    if (/\/api\/commission(?:\/|$)/.test(path)) {
+      if (isBusinessAdminRole(currentUser?.role) && activeTab === 'salary') void loadSalaryData()
+      return
+    }
+    if (/\/api\/onboarding\/admin\/submissions(?:\/|$)/.test(path)) {
+      void loadEmployees()
+      return
+    }
+    if (/\/api\/offboarding\/admin\/submissions(?:\/|$)/.test(path)) {
+      void Promise.all([loadDepartments(), loadEmployees()])
+      if (isBusinessAdminRole(currentUser?.role)) void loadSalaryData()
+    }
+  }, [lastDataChange])
 
   function formatGridNumber(value: number) {
     if (Number.isInteger(value)) {
@@ -4130,33 +4793,37 @@ function App() {
     setMessage('Đã gửi yêu cầu export file Excel.')
   }
 
+  if (currentPath === '/onboarding') {
+    return <OnboardingPublic apiBase={apiBase} />
+  }
+
+  if (currentPath === '/offboarding') {
+    return <OffboardingPublic apiBase={apiBase} />
+  }
+
   if (!token) {
     return (
-      <div className="w-screen h-screen flex flex-row overflow-hidden bg-[#f4f7fa] font-sans text-slate-700" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>
-        {/* KHANH BÊN TRÁI: KHOANG ĐỒ HỌA 3D (60% CHIỀU RỘNG) */}
-        <div className="hidden md:block md:w-[60%] h-full relative overflow-hidden bg-gradient-to-br from-[#020617] via-[#091124] to-[#020617]">
-          <div className="absolute top-8 left-8 z-10 select-none pointer-events-none">
-            <h1 className="text-3xl font-extrabold text-white tracking-wider uppercase" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>
-              SEALINK INTERNATIONAL
-            </h1>
-            <p className="text-sm text-sky-400 font-semibold tracking-wide mt-1" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>
-              Global Logistics & Payroll Network
-            </p>
+      <div className="sealink-login-shell w-screen h-screen overflow-hidden font-sans text-slate-700" style={{ fontFamily: 'var(--font-sans)' }}>
+        <div className="sealink-login-visual">
+          <div className="sealink-login-visual-copy">
+            <h1>SEALINK INTERNATIONAL</h1>
+            <p>Global Logistics &amp; Payroll Network</p>
           </div>
           <Login3DGlobe />
         </div>
 
-        {/* KHANH BÊN PHẢI: FORM ĐĂNG NHẬP THỦ CÔNG (40% CHIỀU RỘNG) */}
-        <div className="w-full md:w-[40%] h-full bg-white flex flex-col justify-center px-8 sm:px-16 md:px-12 lg:px-20 xl:px-24 py-12 shadow-[0_0_50px_rgba(0,0,0,0.05)] border-l border-slate-100 relative z-20 overflow-y-auto">
-          <div className="w-full max-w-md mx-auto space-y-8">
-            <div className="flex flex-col items-center text-center space-y-4">
-              <div className="h-20 w-20 rounded-3xl overflow-hidden bg-slate-50 flex items-center justify-center p-2 border border-slate-200 shadow-sm transition hover:scale-105">
-                <img src={logoSealink} alt="Sealink Logo" className="object-contain w-full h-full rounded-2xl" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>SEALINK PORTAL</h1>
-                <p className="text-xs text-slate-500 font-semibold tracking-widest uppercase mt-1" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>Hệ thống nhân sự và tiền lương</p>
-              </div>
+        <div className="sealink-login-panel">
+          <div className="sealink-login-background" aria-hidden="true">
+            <span className="sealink-login-grid" />
+            <span className="sealink-login-orbit sealink-login-orbit-one" />
+            <span className="sealink-login-orbit sealink-login-orbit-two" />
+            <span className="sealink-login-glow" />
+          </div>
+          <div className="sealink-login-card">
+            <div className="sealink-login-heading">
+              <p>SEALINK PORTAL</p>
+              <h1>Đăng nhập</h1>
+              <span>Hệ thống nhân sự và tiền lương</span>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-5 login-form">
@@ -4167,35 +4834,38 @@ function App() {
               )}
 
               <div className="space-y-1.5">
-                <label className="text-[11px] font-bold uppercase tracking-wider text-[#475569] block px-1" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>Tên đăng nhập</label>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-[#475569] block px-1" style={{ fontFamily: 'var(--font-sans)' }}>Tên đăng nhập</label>
                 <input
                   type="text"
+                  name="username"
                   value={loginUsername}
                   onChange={(e) => setLoginUsername(e.target.value)}
                   placeholder="Mã nhân viên hoặc email"
+                  autoComplete="username"
                   required
                   className="w-full bg-slate-50 border border-slate-200 focus:border-[#163b66] focus:ring-4 focus:ring-[#163b66]/10 text-slate-800 rounded-2xl px-4 py-3.5 text-sm transition-all outline-none"
-                  style={{ fontFamily: 'Roboto, Arial, sans-serif' }}
+                  style={{ fontFamily: 'var(--font-sans)' }}
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[11px] font-bold uppercase tracking-wider text-[#475569] block px-1" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>Mật khẩu</label>
-                <div className="relative">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-[#475569] block px-1" style={{ fontFamily: 'var(--font-sans)' }}>Mật khẩu</label>
+                <div className="sealink-login-password relative">
                   <input
                     type={showLoginPassword ? 'text' : 'password'}
+                    name="password"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                     placeholder="Nhập mật khẩu truy cập"
                     autoComplete="current-password"
                     required
                     className="w-full bg-slate-50 border border-slate-200 focus:border-[#163b66] focus:ring-4 focus:ring-[#163b66]/10 text-slate-800 rounded-2xl px-4 py-3.5 pr-12 text-sm transition-all outline-none"
-                    style={{ fontFamily: 'Roboto, Arial, sans-serif' }}
+                    style={{ fontFamily: 'var(--font-sans)' }}
                   />
                   <button
                     type="button"
                     onClick={() => setShowLoginPassword((visible) => !visible)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 grid h-8 w-8 place-items-center border-0 bg-transparent p-0 text-slate-500 transition-colors hover:text-[#163b66] focus:outline-none focus:ring-0"
+                    className="sealink-login-password-toggle grid h-8 w-8 place-items-center border-0 bg-transparent p-0 text-slate-500 transition-colors hover:text-[#163b66] focus:outline-none focus:ring-0"
                     aria-label={showLoginPassword ? 'Ẩn mật khẩu' : 'Hiển thị mật khẩu'}
                     title={showLoginPassword ? 'Ẩn mật khẩu' : 'Hiển thị mật khẩu'}
                   >
@@ -4216,11 +4886,27 @@ function App() {
                 </div>
               </div>
 
+              <label className="sealink-login-remember">
+                <input
+                  type="checkbox"
+                  checked={rememberLogin}
+                  onChange={(event) => {
+                    const checked = event.target.checked
+                    setRememberLogin(checked)
+                    if (!checked) {
+                      localStorage.removeItem(REMEMBER_LOGIN_PREFERENCE_KEY)
+                      localStorage.removeItem(REMEMBER_LOGIN_USERNAME_KEY)
+                    }
+                  }}
+                />
+                <span>Ghi nhớ đăng nhập trên thiết bị này</span>
+              </label>
+
               <button
                 type="submit"
                 disabled={loading}
                 className="w-full bg-[#163b66] hover:bg-[#102b49] text-white font-bold py-3.5 px-4 rounded-2xl shadow-[0_12px_24px_-10px_rgba(22,59,102,0.4)] hover:shadow-[0_16px_32px_-10px_rgba(22,59,102,0.6)] transform hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 flex items-center justify-center gap-2 mt-6 cursor-pointer"
-                style={{ fontFamily: 'Roboto, Arial, sans-serif' }}
+                style={{ fontFamily: 'var(--font-sans)' }}
               >
                 {loading ? (
                   <>
@@ -4237,8 +4923,8 @@ function App() {
             </form>
 
             <div className="pt-6 text-center border-t border-slate-100 space-y-1">
-              <span className="text-[11px] text-slate-400 uppercase tracking-widest font-semibold block" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>Phát triển bởi Sealink IT Team</span>
-              <span className="text-[10px] text-slate-400 block" style={{ fontFamily: 'Roboto, Arial, sans-serif' }}>Hệ thống phân quyền và bảo mật cao</span>
+              <span className="text-[11px] text-slate-400 uppercase tracking-widest font-semibold block" style={{ fontFamily: 'var(--font-sans)' }}>Phát triển bởi Sealink IT Team</span>
+              <span className="text-[11px] text-slate-400 block" style={{ fontFamily: 'var(--font-sans)' }}>Hệ thống phân quyền và bảo mật cao</span>
             </div>
           </div>
         </div>
@@ -4263,28 +4949,77 @@ function App() {
       onDismissNotificationNotice={() => setNotificationNotice(null)}
       headerControls={
         isBusinessAdminRole(currentUser?.role) && activeTab === 'salary' ? (
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-600">Tháng lương:</span>
-            <select
+          <div className="flex items-end gap-2">
+            <MonthYearSelect
               id="salary-period-select"
               value={salaryPeriod}
-              onChange={(e) => {
-                setSalaryPeriod(e.target.value)
+              minYear={salaryPeriodYearBounds.min}
+              maxYear={salaryPeriodYearBounds.max}
+              onChange={(period) => {
+                salaryPeriodTouchedRef.current = true
+                setSalaryPeriod(period)
                 setIsSalaryConfirmed(false)
                 setIsSalaryLocked(false)
                 setLastSalaryUndo(null)
               }}
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-[#163B66] focus:ring-4 focus:ring-[#163B66]/10"
-            >
-              {MONTH_OPTIONS_2026.map((period) => (
-                <option key={period} value={period}>{formatMonthOption(period)}</option>
-              ))}
-            </select>
+              yearLabel="Năm lương"
+              monthLabel="Tháng lương"
+            />
           </div>
         ) : undefined
       }
     >
-      <div className="panel" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
+      <div
+        className={`panel${activeTab === 'employees' ? ' employee-directory-page-panel' : ''}${activeTab === 'timesheets' ? ' timesheet-page-panel' : ''}`}
+        style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}
+      >
+        {(isBusinessAdminRole(currentUser?.role) || currentUser?.role === 'HR_ADMIN') &&
+          (activeTab === 'employees' || activeTab === 'onboarding' || activeTab === 'offboarding') && (
+            <section className="mb-6 flex flex-col gap-4 rounded-[20px] border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-600">Không gian Nhân sự</p>
+                <h2 className="mt-1 text-lg font-semibold text-slate-900">Vòng đời nhân sự</h2>
+                <p className="mt-1 text-sm text-slate-600">Quản lý hồ sơ, tiếp nhận nhân viên mới và xử lý quy trình nghỉ việc trong cùng một không gian.</p>
+              </div>
+              <div
+                className="app-segmented-tabs hr-lifecycle-tabs min-w-0"
+                role="tablist"
+                aria-label="Chức năng Nhân sự"
+                style={{ marginTop: 0 }}
+              >
+                <button
+                  type="button"
+                  className="app-segmented-tab"
+                  role="tab"
+                  aria-selected={activeTab === 'employees'}
+                  onClick={() => handleTabChange('employees')}
+                >
+                  <AppIcon name="users" size={16} />
+                  Hồ sơ nhân sự
+                </button>
+                <button
+                  type="button"
+                  className="app-segmented-tab"
+                  role="tab"
+                  aria-selected={activeTab === 'onboarding'}
+                  onClick={() => handleTabChange('onboarding')}
+                >
+                  <AppIcon name="document" size={16} />
+                  Onboarding nhân viên mới
+                </button>
+                <button
+                  type="button"
+                  className="app-segmented-tab"
+                  role="tab"
+                  aria-selected={activeTab === 'offboarding'}
+                  onClick={() => handleTabChange('offboarding')}
+                >
+                  <AppIcon name="leave" size={16} />
+                  Offboarding / Nghỉ việc
+                </button>
+              </div>
+            </section>
+          )}
         {isBusinessAdminRole(currentUser?.role) && activeTab === 'dashboard' && (
           <>
             {/* 3 KPI Cards Admin Dashboard as Pie Chart */}
@@ -4319,20 +5054,12 @@ function App() {
                 <h2>Bộ lọc KPI theo tháng công</h2>
               <label>
                 Period Start
-                <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+                <BrandedDateInput value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
               </label>
               <label>
                 Period End
-                <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+                <BrandedDateInput value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
               </label>
-              <div className="dashboard-kpi-actions">
-                <button type="button" className="dashboard-kpi-action" onClick={loadDashboardKpi} disabled={loading}>
-                  Tải Dashboard KPI
-                </button>
-                <button type="button" className="dashboard-kpi-action" onClick={exportDashboardKpi}>
-                  Export KPI .xlsx
-                </button>
-              </div>
               <label>
                 Auto refresh KPI
                 <select
@@ -4366,7 +5093,7 @@ function App() {
                   ))}
                 </div>
               ) : (
-                <p className="muted">Chưa có dữ liệu KPI. Hãy bấm Tải Dashboard KPI.</p>
+                <p className="muted">Chưa có dữ liệu KPI cho kỳ đã chọn.</p>
               )}
             </div>
 
@@ -4411,30 +5138,14 @@ function App() {
                   </article>
                 </div>
 
-                <div className="card full-width">
-                  <h2>Xu hướng theo ngày</h2>
-                  <div className="table-wrap compact">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Ngày</th>
-                          <th>Đi làm</th>
-                          <th>Vắng</th>
-                          <th>Bất thường</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dashboardKpi.trend.map((point) => (
-                          <tr key={point.work_date}>
-                            <td>{point.work_date}</td>
-                            <td>{point.present_count}</td>
-                            <td>{point.absent_count}</td>
-                            <td>{point.abnormal_count}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                <div className="card full-width dashboard-trend-summary">
+                  <div>
+                    <h2>Xu hướng theo ngày</h2>
+                    <p className="muted">{dashboardKpi.trend.length} ngày có dữ liệu trong kỳ đang chọn.</p>
                   </div>
+                  <button type="button" className="dashboard-trend-open" onClick={() => setDashboardTrendOpen(true)}>
+                    Xem chi tiết
+                  </button>
                 </div>
               </>
             )}
@@ -4448,6 +5159,10 @@ function App() {
 
         {currentUser?.role === 'USER' && activeTab === 'personal-dashboard' && (
           <PersonalDashboard apiRequest={apiRequest} />
+        )}
+
+        {activeTab === 'my-account' && (
+          <PersonalAccount apiRequest={apiRequest} embedded />
         )}
 
         {(
@@ -4492,12 +5207,12 @@ function App() {
                   <div className="sl-date-field-group">
                     <div className="sl-input-wrapper">
                       <span className="sl-prefix">Từ:</span>
-                      <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+                      <BrandedDateInput value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
                     </div>
                     <span className="sl-range-tilde">~</span>
                     <div className="sl-input-wrapper">
                       <span className="sl-prefix">Đến:</span>
-                      <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+                      <BrandedDateInput value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
                     </div>
                   </div>
 
@@ -4507,7 +5222,7 @@ function App() {
                     <span className="sl-input-label">Máy công:</span>
                     <label className="sl-custom-upload-btn">
                       <input ref={fileInputRef} type="file" onChange={onImportFileChange} className="sl-hidden-file" />
-                      <span className="sl-tag-status">{importFile ? '✓ Đã chọn' : 'Chọn tệp'}</span>
+                      <span className="sl-tag-status">{importFile && <AppIcon name="check" size={13} />}{importFile ? 'Đã chọn' : 'Chọn tệp'}</span>
                     </label>
                   </div>
 
@@ -4517,7 +5232,7 @@ function App() {
                     <span className="sl-input-label">Notion:</span>
                     <label className="sl-custom-upload-btn">
                       <input ref={notionFileInputRef} type="file" accept=".csv,text/csv" onChange={onNotionFileChange} className="sl-hidden-file" />
-                      <span className="sl-tag-status">{notionFile ? '✓ Đã chọn' : 'Chọn CSV'}</span>
+                      <span className="sl-tag-status">{notionFile && <AppIcon name="check" size={13} />}{notionFile ? 'Đã chọn' : 'Chọn CSV'}</span>
                     </label>
                     {notionFile && (
                       <button type="button" onClick={clearNotionFile} className="sl-btn-delete-csv">Bỏ CSV</button>
@@ -4745,7 +5460,7 @@ function App() {
                 setDetailEmployeePassword('')
                 setDetailEmployeeOriginalType((employee.employee_type || 'FULLTIME') as EmployeeType)
                 setDetailEmployeeTypeEffectiveDate(new Date().toISOString().slice(0, 10))
-                setDetailEmployee(employee)
+                setDetailEmployee(employeeWithDerivedUsername(employee))
               } catch (error) {
                 setMessage(`Không thể mở hồ sơ nhân viên: ${(error as Error).message}`)
               }
@@ -4790,7 +5505,7 @@ function App() {
                     gap: '8px',
                     width: '100%'
                   }}>
-                    <span style={{ fontSize: '16px' }}>⚠️</span>
+                    <AppIcon name="warning" size={17} />
                     <span>{employeeError}</span>
                     <button
                       type="button" 
@@ -4798,7 +5513,7 @@ function App() {
                       className="app-close-button app-close-button--compact"
                       style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#b91c1c', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}
                     >
-                      ×
+                      <AppIcon name="close" size={14} />
                     </button>
                   </div>
                 )}
@@ -4854,7 +5569,7 @@ function App() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="grid gap-2">
                   <h3 className="m-0 text-lg font-bold tracking-[-0.02em] text-slate-900">Bảng hồ sơ nhân viên</h3>
-                  <p className="text-sm text-slate-500">Tìm kiếm theo mã máy, tên tiếng Việt hoặc chuỗi định danh trên Notion.</p>
+                  <p className="text-sm text-slate-500">Tìm kiếm tức thời trên toàn bộ hồ sơ rồi mới chia 10 người mỗi trang.</p>
                 </div>
 
                 <label className="block w-full max-w-md text-sm font-semibold text-slate-600">
@@ -4862,20 +5577,81 @@ function App() {
                   <input
                     className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-[#163B66] focus:ring-4 focus:ring-[#163B66]/10"
                     value={employeeSearch}
-                    onChange={(e) => setEmployeeSearch(e.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
-                        void loadEmployees()
-                      }
+                    onChange={(e) => {
+                      setEmployeeSearch(e.target.value)
+                      setEmployeeDirectoryPage(1)
                     }}
-                    placeholder="Ví dụ: E001, ..., DOCS - ..."
+                    placeholder="Mã máy, mã NV, họ tên, Notion, email..."
                   />
                 </label>
               </div>
 
+              <div className="employee-directory-controls" aria-label="Bộ lọc hồ sơ nhân viên">
+                <label>
+                  Phòng ban
+                  <select
+                    value={employeeDepartmentFilter}
+                    onChange={(event) => {
+                      setEmployeeDepartmentFilter(event.target.value)
+                      setEmployeeDirectoryPage(1)
+                    }}
+                  >
+                    <option value="all">Tất cả phòng ban</option>
+                    {employeeDepartmentOptions.map((department) => (
+                      <option key={department} value={department}>{department}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Trạng thái
+                  <select
+                    value={employeeStatusFilter}
+                    onChange={(event) => {
+                      setEmployeeStatusFilter(event.target.value as EmployeeDirectoryStatusFilter)
+                      setEmployeeDirectoryPage(1)
+                    }}
+                  >
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="active">Đang hoạt động</option>
+                    <option value="inactive">Đã nghỉ việc</option>
+                  </select>
+                </label>
+                <label>
+                  Loại nhân viên
+                  <select
+                    value={employeeTypeFilter}
+                    onChange={(event) => {
+                      setEmployeeTypeFilter(event.target.value)
+                      setEmployeeDirectoryPage(1)
+                    }}
+                  >
+                    <option value="all">Tất cả loại nhân viên</option>
+                    {Object.entries(EMPLOYEE_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="employee-directory-reset"
+                  onClick={() => {
+                    setEmployeeSearch('')
+                    setEmployeeDepartmentFilter('all')
+                    setEmployeeStatusFilter('all')
+                    setEmployeeTypeFilter('all')
+                    setEmployeeDirectoryPage(1)
+                  }}
+                >
+                  Đặt lại
+                </button>
+              </div>
+              <div className="employee-directory-result-summary" aria-live="polite">
+                <span>Tìm thấy <strong>{filteredEmployeeDirectoryRows.length}</strong> / {employees.length} hồ sơ</span>
+                <span>Trang {employeeDirectoryPagination.currentPage} / {employeeDirectoryPagination.totalPages} · {EMPLOYEE_DIRECTORY_PAGE_SIZE} người/trang</span>
+              </div>
+
               <div
-                className="mt-6 w-full max-w-full max-h-[640px] overflow-auto overscroll-contain rounded-[24px] border border-slate-200"
+                className="employee-directory-table-wrap mt-6 w-full max-w-full rounded-[24px] border border-slate-200"
                 style={{ width: '100%', maxWidth: '100%' }}
               >
                 <table className="employee-directory-table min-w-full divide-y divide-slate-200 text-sm text-slate-700" style={{ minWidth: '2900px' }}>
@@ -4888,28 +5664,28 @@ function App() {
                       <th className="px-4 py-3">Phòng ban</th>
                       <th className="px-4 py-3 text-right">Lương HĐLĐ (VND)</th>
                       {/* Cột phụ cấp mặc định — nền vàng nhạt */}
-                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
                         CƠM (MIỄN)
                       </th>
-                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
                         CƠM (THUẾ)
                       </th>
-                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
                         ĐT (MIỄN)
                       </th>
-                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
                         XĂNG XE
                       </th>
-                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#d97706', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#d97706', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
                         KPI
                       </th>
-                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
                         TN KHÁC
                       </th>
-                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#b45309', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#b45309', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
                         THƯỞNG
                       </th>
-                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>
+                      <th className="px-3 py-3 text-right" style={{ background: '#fffbeb', color: '#92400e', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
                         LƯƠNG T14
                       </th>
                       <th className="px-4 py-3">Loại NV</th>
@@ -4921,15 +5697,17 @@ function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white">
-                    {employees.length === 0 && (
+                    {employeeDirectoryPagination.rows.length === 0 && (
                       <tr>
                         <td colSpan={20} className="px-4 py-10 text-center text-sm text-slate-500">
-                          Chưa có hồ sơ nhân sự. Bấm "Thêm nhân viên mới" để tạo mapping đầu tiên.
+                          {employees.length === 0
+                            ? 'Chưa có hồ sơ nhân sự. Bấm "Thêm nhân viên mới" để tạo mapping đầu tiên.'
+                            : 'Không có hồ sơ phù hợp với nội dung tìm kiếm và bộ lọc hiện tại.'}
                         </td>
                       </tr>
                     )}
 
-                    {employees.map((emp) => (
+                    {employeeDirectoryPagination.rows.map((emp) => (
                       <tr key={emp.id} className="align-top hover:bg-slate-50/80">
                         {/* Mã máy / Mã NV */}
                         <td className="employee-directory-sticky employee-directory-sticky-1 px-4 py-4">
@@ -4980,7 +5758,7 @@ function App() {
                                   setDetailEmployeePassword('')
                                   setDetailEmployeeOriginalType((emp.employee_type || 'FULLTIME') as EmployeeType)
                                   setDetailEmployeeTypeEffectiveDate(new Date().toISOString().slice(0, 10))
-                                  setDetailEmployee(emp)
+                                  setDetailEmployee(employeeWithDerivedUsername(emp))
                                 }}
                               >
                                 {emp.full_name}
@@ -5015,13 +5793,15 @@ function App() {
                                 <span className="text-xs italic text-slate-400">Chưa cấp tài khoản</span>
                               )}
                               <span
-                                className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${
+                                className={`inline-flex rounded-full px-2 py-1 text-[11px] font-bold ${
                                   (emp.account_role || emp.access_role) === 'HR_ADMIN'
                                     ? 'bg-purple-50 text-purple-700'
                                     : (emp.account_role || emp.access_role) === 'IT_ADMIN'
                                       ? 'bg-sky-50 text-sky-700'
                                       : (emp.account_role || emp.access_role) === 'ADMIN'
                                         ? 'bg-orange-50 text-orange-800'
+                                        : (emp.account_role || emp.access_role) === 'DIRECTOR'
+                                          ? 'bg-cyan-50 text-cyan-800'
                                         : 'bg-slate-100 text-slate-600'
                                 }`}
                                 title={emp.access_role_reason || ''}
@@ -5091,7 +5871,7 @@ function App() {
                             <div className="flex flex-col gap-1">
                               <span>{emp.department_name ?? '-'}</span>
                               {emp.bonus_coefficient && emp.bonus_coefficient > 0 && (
-                                <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded w-fit">
+                                <span className="text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded w-fit">
                                   Bonus: PB ID {emp.bonus_coefficient}
                                 </span>
                               )}
@@ -5179,6 +5959,7 @@ function App() {
                               <option value="FULLTIME">Chính thức</option>
                               <option value="PROBATION">Thử việc</option>
                               <option value="INTERN">Học việc</option>
+                              <option value="TRAINEE">Thực tập</option>
                             </select>
                           ) : (
                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${ emp.employee_type === 'FULLTIME' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700' }`}>
@@ -5228,30 +6009,32 @@ function App() {
                         <td className="px-4 py-4">
                           {editingEmployeeId === emp.id ? (
                             <div className="space-y-2">
-                              <input
-                                type="date"
+                              <BrandedDateInput
                                 className="h-9 w-full min-w-[130px] rounded-xl border border-slate-200 px-3 text-sm outline-none transition focus:border-[#163B66] focus:ring-4 focus:ring-[#163B66]/10"
                                 value={editEmployeeForm.start_date}
                                 onChange={(e) => setEditEmployeeForm((prev) => ({ ...prev, start_date: e.target.value }))}
                               />
                               {editEmployeeForm.status === 'RESIGNED' && (
-                                <select
+                                <BrandedDateInput
                                   className="h-9 w-full min-w-[130px] rounded-xl border border-slate-200 px-3 text-sm outline-none transition focus:border-[#163B66] focus:ring-4 focus:ring-[#163B66]/10"
-                                  value={editEmployeeForm.resignation_period}
-                                  onChange={(e) => setEditEmployeeForm((prev) => ({ ...prev, resignation_period: e.target.value }))}
-                                >
-                                  <option value="">Chọn tháng nghỉ...</option>
-                                  {MONTH_OPTIONS_2026.map((period) => (
-                                    <option key={period} value={period}>{formatMonthOption(period)}</option>
-                                  ))}
-                                </select>
+                                  aria-label={`Ngày làm việc cuối của ${emp.full_name}`}
+                                  value={editEmployeeForm.last_working_date}
+                                  onChange={(e) => setEditEmployeeForm((prev) => ({
+                                    ...prev,
+                                    last_working_date: e.target.value,
+                                    resignation_period: e.target.value ? e.target.value.slice(0, 7) : '',
+                                  }))}
+                                />
                               )}
                             </div>
                           ) : (
                             <div className="space-y-1 text-xs">
                               <p><span className="text-slate-400">Vào:</span> {emp.start_date ? emp.start_date.split('T')[0].split('-').reverse().join('/') : '-'}</p>
-                              {emp.status === 'RESIGNED' && emp.resignation_period && (
-                                <p><span className="text-rose-500 font-semibold">Tháng nghỉ:</span> {emp.resignation_period}</p>
+                              {emp.status === 'RESIGNED' && (emp.last_working_date || emp.resignation_period) && (
+                                <p><span className="text-rose-600 font-semibold">Ngày làm cuối:</span> {emp.last_working_date ? emp.last_working_date.split('T')[0].split('-').reverse().join('/') : emp.resignation_period}</p>
+                              )}
+                              {emp.status === 'RESIGNED' && emp.last_pay_date && (
+                                <p><span className="text-slate-500 font-semibold">Trả lương cuối:</span> {emp.last_pay_date.split('T')[0].split('-').reverse().join('/')}</p>
                               )}
                             </div>
                           )}
@@ -5265,7 +6048,8 @@ function App() {
                               onChange={(e) => setEditEmployeeForm((prev) => ({ 
                                 ...prev, 
                                 status: e.target.value,
-                                is_active: e.target.value === 'ACTIVE'
+                                is_active: e.target.value === 'ACTIVE',
+                                ...(e.target.value !== 'RESIGNED' ? { resignation_period: '', last_working_date: '', last_pay_date: '' } : {}),
                               }))}
                             >
                               <option value="ACTIVE">Đang hoạt động</option>
@@ -5320,7 +6104,7 @@ function App() {
                                 <button
                                   type="button"
                                   onClick={() => deleteEmployee(emp)}
-                                  className="inline-flex h-[36px] w-[80px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
+                                  className="app-delete-button inline-flex h-[36px] w-[80px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
                                 >
                                   Xóa
                                 </button>
@@ -5333,6 +6117,40 @@ function App() {
                   </tbody>
                 </table>
               </div>
+              <nav className="employee-directory-pagination" aria-label="Phân trang hồ sơ nhân viên">
+                <span>
+                  {filteredEmployeeDirectoryRows.length > 0
+                    ? `Hiển thị ${employeeDirectoryPagination.startIndex + 1}–${Math.min(employeeDirectoryPagination.startIndex + EMPLOYEE_DIRECTORY_PAGE_SIZE, filteredEmployeeDirectoryRows.length)} trong ${filteredEmployeeDirectoryRows.length}`
+                    : 'Không có kết quả'}
+                </span>
+                <div className="employee-directory-page-buttons">
+                  <button
+                    type="button"
+                    onClick={() => setEmployeeDirectoryPage((page) => Math.max(1, page - 1))}
+                    disabled={employeeDirectoryPagination.currentPage === 1}
+                  >
+                    Trước
+                  </button>
+                  {Array.from({ length: employeeDirectoryPagination.totalPages }, (_, index) => index + 1).map((page) => (
+                    <button
+                      key={page}
+                      type="button"
+                      className={page === employeeDirectoryPagination.currentPage ? 'is-active' : ''}
+                      onClick={() => setEmployeeDirectoryPage(page)}
+                      aria-current={page === employeeDirectoryPagination.currentPage ? 'page' : undefined}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setEmployeeDirectoryPage((page) => Math.min(employeeDirectoryPagination.totalPages, page + 1))}
+                    disabled={employeeDirectoryPagination.currentPage === employeeDirectoryPagination.totalPages}
+                  >
+                    Sau
+                  </button>
+                </div>
+              </nav>
             </div>
           </section>
         )}
@@ -5356,44 +6174,11 @@ function App() {
               </div>
               <label>
                 Period Start
-                <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+                <BrandedDateInput value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
               </label>
               <label>
                 Period End
-                <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
-              </label>
-              <label>
-                Lọc theo ID hoặc tên nhân viên
-                <input
-                  value={timesheetEmployeeFilter}
-                  onChange={(e) => setTimesheetEmployeeFilter(e.target.value)}
-                  placeholder="E001 hoặc Nguyen"
-                />
-              </label>
-              <label>
-                Lọc phòng ban
-                <select
-                  value={timesheetDepartmentFilter}
-                  onChange={(e) => setTimesheetDepartmentFilter(e.target.value)}
-                >
-                  <option value="all">Tất cả</option>
-                  {Array.from(new Set(timesheetGridRows.map((row) => row.department_name ?? 'N/A'))).map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Lọc trạng thái bất thường
-                <select
-                  value={timesheetAbnormalFilter}
-                  onChange={(e) => setTimesheetAbnormalFilter(e.target.value as 'all' | 'abnormal' | 'normal')}
-                >
-                  <option value="all">Tất cả</option>
-                  <option value="abnormal">Chỉ bất thường</option>
-                  <option value="normal">Chỉ bình thường</option>
-                </select>
+                <BrandedDateInput value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
               </label>
               <button type="button" onClick={loadTimesheets} disabled={loading}>Tải bảng công</button>
             </div>
@@ -5405,12 +6190,10 @@ function App() {
                 <h2 style={{ margin: 0, fontSize: '18px', color: '#1e3a8a', fontWeight: 800 }}>Grid ngày công 23 → 22</h2>
                 
                 <div className="app-action-toolbar" style={{ flexDirection: 'row' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '13px', color: '#475569', fontWeight: 600 }}>Tháng công:</span>
-                    <select
+                  <MonthYearSelect
+                      id="timesheet-period"
                       value={`${new Date(periodEnd).getFullYear()}-${String(new Date(periodEnd).getMonth() + 1).padStart(2, '0')}`}
-                      onChange={(e) => {
-                        const val = e.target.value;
+                      onChange={(val) => {
                         const [year, month] = val.split('-');
                         const endD = new Date(Number(year), Number(month) - 1, 22);
                         const startD = new Date(Number(year), Number(month) - 2, 23);
@@ -5418,18 +6201,15 @@ function App() {
                         setPeriodStart(fmt(startD));
                         setPeriodEnd(fmt(endD));
                       }}
-                      style={{ height: '32px', padding: '0 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', backgroundColor: '#f8fafc' }}
-                    >
-                      {MONTH_OPTIONS_2026.map((period) => (
-                        <option key={period} value={period}>{formatMonthOption(period)}</option>
-                      ))}
-                    </select>
-                  </div>
+                      compact
+                      yearLabel="Năm công"
+                      monthLabel="Tháng công"
+                  />
                   
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '13px', color: '#475569', fontWeight: 600 }}>Từ ngày:</span>
-                    <input 
-                      type="date" 
+                    <BrandedDateInput
+                      containerClassName="branded-date-inline"
                       value={periodStart} 
                       onChange={(e) => setPeriodStart(e.target.value)} 
                       style={{ height: '32px', padding: '0 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
@@ -5437,8 +6217,8 @@ function App() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '13px', color: '#475569', fontWeight: 600 }}>Đến ngày:</span>
-                    <input 
-                      type="date" 
+                    <BrandedDateInput
+                      containerClassName="branded-date-inline"
                       value={periodEnd} 
                       onChange={(e) => setPeriodEnd(e.target.value)} 
                       style={{ height: '32px', padding: '0 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
@@ -5468,12 +6248,9 @@ function App() {
                             disabled={loading || timesheetGridRows.length === 0}
                             title={timesheetIsLocked ? 'Bảng công đang khóa. Nhấp để mở khóa.' : 'Nhấp để khóa bảng công'}
                             aria-label={timesheetIsLocked ? 'Mở khóa bảng công' : 'Khóa bảng công'}
-                            className={`icon-only-control${timesheetIsLocked ? ' is-active' : ''}`}
+                            className={`icon-only-control timesheet-lock-control ${timesheetIsLocked ? 'is-locked' : 'is-unlocked'}`}
                           >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <rect x="5" y="10" width="14" height="10" rx="2" />
-                              {timesheetIsLocked ? <path d="M8 10V7a4 4 0 0 1 8 0v3" /> : <path d="M16 10V7a4 4 0 0 0-7.4-2" />}
-                            </svg>
+                            <AppIcon name={timesheetIsLocked ? 'lock' : 'unlock'} size={19} />
                           </button>
                         </div>
                       );
@@ -5533,7 +6310,19 @@ function App() {
                   </button>}
                   <button
                     type="button"
-                    className="app-action-button"
+                    className="app-action-button timesheet-history-open"
+                    onClick={() => {
+                      setOverrideLogs([])
+                      setOverrideHistoryOpen(true)
+                      void loadOverrideHistory({ silent: true })
+                    }}
+                  >
+                    <AppIcon name="history" size={15} />
+                    Lịch sử Override
+                  </button>
+                  <button
+                    type="button"
+                    className="app-action-button app-download-button"
                     onClick={exportTimesheet}
                     disabled={loading || timesheetGridRows.length === 0}
                     style={{
@@ -5560,7 +6349,7 @@ function App() {
                   </button>
                   <button
                     type="button"
-                    className="app-action-button app-action-button--danger"
+                    className="app-action-button app-action-button--danger app-delete-button"
                     onClick={deleteTimesheetPeriod}
                     disabled={loading || timesheetIsLocked}
                     style={{
@@ -5587,6 +6376,98 @@ function App() {
                     Xóa bảng công
                   </button>
                 </div>
+              </div>
+              <div className="timesheet-grid-controls" aria-label="Tìm kiếm và lọc bảng công">
+                <label className="timesheet-grid-control timesheet-grid-search">
+                  <span>Tìm kiếm toàn bộ bảng công</span>
+                  <input
+                    type="search"
+                    value={timesheetEmployeeFilter}
+                    onChange={(event) => {
+                      setTimesheetEmployeeFilter(event.target.value)
+                      setTimesheetPage(1)
+                    }}
+                    placeholder="Tên, ID máy, phòng ban, ký hiệu công..."
+                    aria-label="Tìm kiếm toàn bộ bảng công"
+                  />
+                </label>
+                <label className="timesheet-grid-control">
+                  <span>Phòng ban</span>
+                  <select
+                    value={timesheetDepartmentFilter}
+                    onChange={(event) => {
+                      setTimesheetDepartmentFilter(event.target.value)
+                      setTimesheetPage(1)
+                    }}
+                    aria-label="Lọc bảng công theo phòng ban"
+                  >
+                    <option value="all">Tất cả phòng ban</option>
+                    {timesheetDepartmentOptions.map((department) => (
+                      <option key={department} value={department}>{department}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="timesheet-grid-control">
+                  <span>Bất thường</span>
+                  <select
+                    value={timesheetAbnormalFilter}
+                    onChange={(event) => {
+                      setTimesheetAbnormalFilter(event.target.value as TimesheetAbnormalFilter)
+                      setTimesheetPage(1)
+                    }}
+                    aria-label="Lọc bảng công theo trạng thái bất thường"
+                  >
+                    <option value="all">Tất cả trạng thái</option>
+                    <option value="abnormal">Có bất thường</option>
+                    <option value="normal">Không bất thường</option>
+                  </select>
+                </label>
+                <label className="timesheet-grid-control">
+                  <span>Ký hiệu công</span>
+                  <select
+                    value={timesheetSymbolFilter}
+                    onChange={(event) => {
+                      setTimesheetSymbolFilter(event.target.value)
+                      setTimesheetPage(1)
+                    }}
+                    aria-label="Lọc bảng công theo ký hiệu công"
+                  >
+                    <option value="all">Tất cả ký hiệu</option>
+                    <option value="X">X — Đi làm</option>
+                    <option value="P">P — Nghỉ phép</option>
+                    <option value="Ro">Ro — Vắng</option>
+                    <option value="CT">CT — Công tác</option>
+                    <option value="X/P">X/P</option>
+                    <option value="P/X">P/X</option>
+                    <option value="P/Ro">P/Ro</option>
+                    <option value="Ro/P">Ro/P</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="timesheet-grid-reset"
+                  onClick={() => {
+                    setTimesheetEmployeeFilter('')
+                    setTimesheetDepartmentFilter('all')
+                    setTimesheetAbnormalFilter('all')
+                    setTimesheetSymbolFilter('all')
+                    setTimesheetPage(1)
+                  }}
+                  disabled={
+                    !timesheetEmployeeFilter
+                    && timesheetDepartmentFilter === 'all'
+                    && timesheetAbnormalFilter === 'all'
+                    && timesheetSymbolFilter === 'all'
+                  }
+                >
+                  Đặt lại
+                </button>
+              </div>
+              <div className="timesheet-grid-result-summary" aria-live="polite">
+                <span>
+                  Tìm thấy <strong>{filteredTimesheetGridRows.length}</strong> / {timesheetGridRows.length} nhân viên
+                </span>
+                <span>Trang {timesheetPagination.currentPage} / {timesheetPagination.totalPages} · 10 người/trang</span>
               </div>
               <div className="timesheet-legend" aria-label="Giải thích ký hiệu bảng công">
                 <div className="timesheet-legend-item symbol-work">
@@ -5634,6 +6515,8 @@ function App() {
                       <th rowSpan={2} className="sticky-col sticky-index">ID</th>
                       <th rowSpan={2} className="sticky-col sticky-name">Họ Và Tên</th>
                       <th rowSpan={2} className="sticky-col sticky-flag">Bất thường</th>
+                      <th rowSpan={2} className="timesheet-total-header" title="Công tính lương: công thực tế + phép hưởng lương + WFH">Ngày công</th>
+                      <th rowSpan={2} className="timesheet-total-header" title="Công thực tế có dữ liệu chấm công">Ngày công TT</th>
                       {timesheetDayColumns.map((column) => (
                         <th key={`${column.key}-weekday`} className={`timesheet-weekday-header ${column.is_weekend ? 'is-weekend' : ''}`}>
                           {column.weekday_label}
@@ -5654,14 +6537,21 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {timesheetGridRows.map((row, idx) => {
+                    {timesheetPagination.rows.length === 0 && (
+                      <tr>
+                        <td colSpan={timesheetDayColumns.length + 10} className="timesheet-grid-empty">
+                          Không có nhân viên phù hợp với nội dung tìm kiếm và bộ lọc hiện tại.
+                        </td>
+                      </tr>
+                    )}
+                    {timesheetPagination.rows.map((row, idx) => {
                       return (
                         <tr
                           key={`grid-${row.employee_id}`}
                           id={`timesheet-employee-${row.employee_id}`}
                           className={`scroll-mt-28 transition-colors duration-150 hover:bg-slate-50/80 ${timesheetNotificationEmployeeId === row.employee_id ? 'bg-amber-100 ring-2 ring-inset ring-amber-400' : ''}`}
                         >
-                          <td className="sticky-col sticky-index">{idx + 1}</td>
+                          <td className="sticky-col sticky-index">{timesheetPagination.startIndex + idx + 1}</td>
                           <td className="sticky-col sticky-name timesheet-name-cell">
                             <strong>{row.full_name}</strong>
                             <span className="timesheet-name-meta">
@@ -5670,6 +6560,12 @@ function App() {
                             </span>
                           </td>
                           <td className="sticky-col sticky-flag">{row.abnormal_days > 0 ? `Có (${row.abnormal_days})` : 'Không'}</td>
+                          <td className="timesheet-total-cell timesheet-payroll-total" title="Ngày công dùng để tính lương">
+                            {formatGridNumber(row.total_payroll_days)}
+                          </td>
+                          <td className="timesheet-total-cell" title="Ngày công thực tế có chấm công">
+                            {formatGridNumber(row.total_work_days)}
+                          </td>
                           {timesheetDayColumns.map((column) => (
                               <TimesheetCell
                                 key={`${row.employee_id}-${column.key}`}
@@ -5694,66 +6590,161 @@ function App() {
                   </tbody>
                 </table>
               </div>
+              <nav className="timesheet-grid-pagination" aria-label="Phân trang bảng công">
+                <span className="timesheet-grid-page-range">
+                  {filteredTimesheetGridRows.length > 0
+                    ? `Hiển thị ${timesheetPagination.startIndex + 1}–${Math.min(timesheetPagination.startIndex + TIMESHEET_PAGE_SIZE, filteredTimesheetGridRows.length)} trong ${filteredTimesheetGridRows.length}`
+                    : 'Không có kết quả'}
+                </span>
+                {timesheetPagination.totalPages > 1 ? (
+                  <div className="timesheet-grid-page-buttons">
+                    <button
+                      type="button"
+                      onClick={() => setTimesheetPage((page) => Math.max(1, page - 1))}
+                      disabled={timesheetPagination.currentPage === 1}
+                      aria-label="Trang bảng công trước"
+                      title="Về trang trước"
+                    >
+                      Trước
+                    </button>
+                    {Array.from({ length: timesheetPagination.totalPages }, (_, index) => index + 1).map((page) => (
+                      <button
+                        key={page}
+                        type="button"
+                        className={page === timesheetPagination.currentPage ? 'is-active' : ''}
+                        onClick={() => setTimesheetPage(page)}
+                        aria-current={page === timesheetPagination.currentPage ? 'page' : undefined}
+                        aria-label={`Trang bảng công ${page}`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setTimesheetPage((page) => Math.min(timesheetPagination.totalPages, page + 1))}
+                      disabled={timesheetPagination.currentPage === timesheetPagination.totalPages}
+                      aria-label="Trang bảng công sau"
+                      title="Sang trang sau"
+                    >
+                      Sau
+                    </button>
+                  </div>
+                ) : (
+                  <span className="timesheet-grid-single-page">Chỉ có 1 trang · không cần chuyển trang</span>
+                )}
+              </nav>
               <p className="muted">Grid web đã đọc trực tiếp header ngày + T7/CN từ backend và hiển thị đủ các cột phép như form HR.</p>
             </div>
 
-            <div className="card full-width">
-              <h2>Lịch sử Override (audit từ backend)</h2>
-              <div className="inline-actions history-actions override-history-actions">
+          </section>
+        )}
+
+        {activeTab === 'timesheets' && overrideHistoryOpen && createPortal(
+          <div
+            className="modal-backdrop override-history-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setOverrideHistoryOpen(false)
+            }}
+          >
+            <section
+              className="override-history-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="override-history-title"
+            >
+              <header className="override-history-modal-header">
+                <div>
+                  <p>NHẬT KÝ BẢNG CÔNG</p>
+                  <h2 id="override-history-title">Lịch sử Override</h2>
+                  <span>{periodStart} → {periodEnd} · {overrideLogs.length} bản ghi đang hiển thị</span>
+                </div>
+                <button
+                  type="button"
+                  className="app-close-button"
+                  aria-label="Đóng lịch sử Override"
+                  onClick={() => setOverrideHistoryOpen(false)}
+                >
+                  <AppIcon name="close" size={17} />
+                </button>
+              </header>
+
+              <div className="override-history-modal-body">
+                <div className="inline-actions history-actions override-history-actions">
                   <label className="override-history-filter">
                     Lọc theo mã nhân viên
-                  <input
-                    value={overrideHistoryEmployeeId}
-                    onChange={(e) => setOverrideHistoryEmployeeId(e.target.value)}
-                    placeholder="Để trống = tất cả"
-                  />
-                </label>
-                <label>
-                  Số bản ghi
-                  <input
-                    type="number"
-                    min={1}
-                    max={1000}
-                    value={overrideHistoryLimit}
-                    onChange={(e) => setOverrideHistoryLimit(e.target.value)}
-                  />
-                </label>
-                <button className="history-download-button" type="button" onClick={() => void loadOverrideHistory()} disabled={loading} aria-label="Tải lịch sử chỉnh sửa" title="Tải lịch sử chỉnh sửa">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 19h14" /></svg>
-                </button>
-              </div>
-              <div className="table-wrap compact" style={{ maxHeight: '350px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
-                <table style={{ minWidth: '100%', borderCollapse: 'collapse' }}>
-                  <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: '#f8fafc', boxShadow: '0 1px 0 rgba(229,231,235,1)' }}>
-                    <tr>
-                      <th style={{ background: '#f8fafc', padding: '12px 16px' }}>Mã audit</th>
-                      <th style={{ background: '#f8fafc', padding: '12px 16px' }}>Nhân viên</th>
-                      <th style={{ background: '#f8fafc', padding: '12px 16px' }}>Thời điểm</th>
-                      <th style={{ background: '#f8fafc', padding: '12px 16px' }}>Ngày công</th>
-                      <th className="audit-column-before">Trước</th>
-                      <th className="audit-column-after">Sau</th>
-                      <th style={{ background: '#f8fafc', padding: '12px 16px' }}>Lý do</th>
-                      <th style={{ background: '#f8fafc', padding: '12px 16px' }}>Người sửa</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {overrideLogs.map((log) => (
-                      <tr key={log.audit_id}>
-                        <td>{log.audit_id}</td>
-                        <td>{`${log.employee_id} - ${log.employee_name}`}</td>
-                        <td>{new Date(log.changed_at).toLocaleString()}</td>
-                        <td>{log.work_date}</td>
-                        <td className="audit-cell-before"><span className="audit-value audit-value-before">{log.old_symbol || '—'}</span></td>
-                        <td className="audit-cell-after"><span className="audit-value audit-value-after">{log.new_symbol || '—'}</span></td>
-                        <td>{log.reason}</td>
-                        <td>{`${log.changed_by_user_id} - ${log.changed_by_name}`}</td>
+                    <input
+                      value={overrideHistoryEmployeeId}
+                      onChange={(event) => setOverrideHistoryEmployeeId(event.target.value)}
+                      placeholder="Để trống = tất cả"
+                    />
+                  </label>
+                  <label>
+                    Số bản ghi
+                    <input
+                      type="number"
+                      min={1}
+                      max={1000}
+                      value={overrideHistoryLimit}
+                      onChange={(event) => setOverrideHistoryLimit(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="history-download-button app-download-button"
+                    type="button"
+                    onClick={() => void loadOverrideHistory()}
+                    disabled={loading}
+                    aria-label="Tải lịch sử chỉnh sửa"
+                    title="Tải lịch sử chỉnh sửa"
+                  >
+                  </button>
+                </div>
+
+                <div className="table-wrap compact override-history-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Mã audit</th>
+                        <th>Nhân viên</th>
+                        <th>Thời điểm</th>
+                        <th>Ngày công</th>
+                        <th className="audit-column-before">Trước</th>
+                        <th className="audit-column-after">Sau</th>
+                        <th>Lý do</th>
+                        <th>Người sửa</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {overrideLogs.length === 0 && (
+                        <tr>
+                          <td colSpan={8} className="override-history-empty">
+                            {loading ? 'Đang tải lịch sử chỉnh sửa...' : 'Không có bản ghi Override phù hợp.'}
+                          </td>
+                        </tr>
+                      )}
+                      {overrideLogs.map((log) => (
+                        <tr key={log.audit_id}>
+                          <td>{log.audit_id}</td>
+                          <td>{`${log.employee_id} - ${log.employee_name}`}</td>
+                          <td>{new Date(log.changed_at).toLocaleString()}</td>
+                          <td>{log.work_date}</td>
+                          <td className="audit-cell-before"><span className="audit-value audit-value-before">{log.old_symbol || '—'}</span></td>
+                          <td className="audit-cell-after"><span className="audit-value audit-value-after">{log.new_symbol || '—'}</span></td>
+                          <td>{log.reason}</td>
+                          <td>{`${log.changed_by_user_id} - ${log.changed_by_name}`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          </section>
+
+              <footer className="override-history-modal-footer">
+                <span>Dữ liệu audit được đọc trực tiếp từ backend.</span>
+                <button type="button" onClick={() => setOverrideHistoryOpen(false)}>Đóng</button>
+              </footer>
+            </section>
+          </div>,
+          document.body,
         )}
 
         {activeTab === 'export' && (
@@ -5762,13 +6753,13 @@ function App() {
               <h2>Export bảng công Excel theo mẫu HR</h2>
               <label>
                 Period Start
-                <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+                <BrandedDateInput value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
               </label>
               <label>
                 Period End
-                <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+                <BrandedDateInput value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
               </label>
-              <button type="button" onClick={exportTimesheet}>Xuất file .xlsx theo tháng công</button>
+              <button type="button" className="app-download-button" onClick={exportTimesheet}>Xuất file .xlsx theo tháng công</button>
             </div>
             <div className="card export-note-card">
               <h2>Ghi chú</h2>
@@ -5809,8 +6800,8 @@ function App() {
                   label: 'Tổng lương thực tế',
                   value: salarySummaries.actual,
                   color: '#10b981',
-                  formula: 'Σ(Lương_HĐLĐ / 26 * Ngày_công_thực)',
-                  description: 'Lương thực tế theo ngày công đi làm.'
+                  formula: 'Σ(Lương_HĐLĐ / Ngày_công_chuẩn * Ngày_công_tính_lương)',
+                  description: 'Dùng cột Ngày công đã bao gồm nghỉ phép, WFH và các ngày được hưởng lương.'
                 }
               ]}
             />
@@ -5821,7 +6812,7 @@ function App() {
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#163B66]">Payroll Calculation</p>
                   <h2 className="text-2xl font-bold tracking-[-0.03em] text-slate-900">Quản lý & Tính toán lương tự động</h2>
                   <p className="text-sm leading-6 text-slate-500">
-                    Cấu hình mức lương hợp đồng gốc và cập nhật các khoản biến động theo tháng (ngày làm việc thực tế, phụ cấp, thưởng) để tự động xuất bảng lương Excel.
+                    Cấu hình mức lương hợp đồng gốc và cập nhật các khoản biến động theo tháng (ngày công tính lương gồm phép/WFH, phụ cấp, thưởng) để tự động xuất bảng lương Excel.
                   </p>
                 </div>
               </div>
@@ -5838,20 +6829,20 @@ function App() {
                     void loadSalaryData()
                   }}
                   aria-selected={salarySubTab === 'grid'}
-                  className={`border-b-2 px-6 py-3 text-sm font-semibold transition whitespace-nowrap ${
+                  className={`app-segmented-tab border-b-2 px-6 py-3 text-sm font-semibold transition whitespace-nowrap ${
                     salarySubTab === 'grid'
                       ? 'border-[#163B66] text-[#163B66]'
                       : 'border-transparent text-slate-500 hover:text-slate-700'
                   }`}
                 >
-                  📊 Bảng tổng hợp (Admin Grid)
+                  <AppIcon name="chart" size={16} /> Bảng tổng hợp (Admin Grid)
                 </button>
                 <button
                   type="button"
                   id="salary-tab-contract"
                   onClick={() => setSalarySubTab('contract')}
                   aria-selected={salarySubTab === 'contract'}
-                  className={`border-b-2 px-6 py-3 text-sm font-semibold transition whitespace-nowrap ${
+                  className={`app-segmented-tab border-b-2 px-6 py-3 text-sm font-semibold transition whitespace-nowrap ${
                     salarySubTab === 'contract'
                       ? 'border-[#163B66] text-[#163B66]'
                       : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -5864,7 +6855,7 @@ function App() {
                   id="salary-tab-commission"
                   onClick={() => setSalarySubTab('commission')}
                   aria-selected={salarySubTab === 'commission'}
-                  className={`border-b-2 px-6 py-3 text-sm font-semibold transition whitespace-nowrap ${
+                  className={`app-segmented-tab border-b-2 px-6 py-3 text-sm font-semibold transition whitespace-nowrap ${
                     salarySubTab === 'commission'
                       ? 'border-[#163B66] text-[#163B66]'
                       : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -5880,6 +6871,33 @@ function App() {
             {/* ══════════════════════════════════════════════════════ */}
             {salarySubTab === 'grid' && (
               <div className="min-h-[250px] h-auto w-full animate-[fadeIn_0.25s_ease-out_forwards]" style={{ minWidth: 0, overflow: 'hidden' }}>
+                {(currentUser?.role === 'DIRECTOR' || currentUser?.role === 'IT_ADMIN')
+                  && salaryApproval?.period === salaryPeriod
+                  && salaryApproval.status === 'PENDING_APPROVAL' && (
+                    <div
+                      id="salary-pending-approval-banner"
+                      className="mb-4 flex flex-col gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-bold text-emerald-950">
+                          Bảng lương tháng {salaryPeriod} đang chờ bạn phê duyệt
+                        </p>
+                        <p className="mt-1 text-sm text-emerald-800">
+                          Phê duyệt sẽ tự động phát hành phiếu lương và gửi thông báo đến nhân viên.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        id="salary-approve-request-button"
+                        onClick={() => void approveSalaryPeriod()}
+                        disabled={loading}
+                        className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white shadow-[0_8px_20px_rgba(5,150,105,0.24)] transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <AppIcon name="check" size={16} />
+                        Phê duyệt bảng lương
+                      </button>
+                    </div>
+                  )}
                 <SalaryDataGrid
                   employees={salaryEmployees}
                   inputs={salaryInputs}
@@ -5912,7 +6930,7 @@ function App() {
                         id="salary-export-btn"
                         onClick={exportSalaryReportTable}
                         disabled={loading}
-                        className="app-action-button"
+                        className="app-action-button app-download-button"
                       >
                         Tải Excel Báo cáo Lương
                       </button>
@@ -5922,7 +6940,7 @@ function App() {
                         onClick={exportPaymentExcel}
                         disabled={loading || salaryEmployees.length === 0}
                         title="Xuất file Payment Excel cho Ngân hàng — theo mẫu Payment_External.xlsx"
-                        className="app-action-button inline-flex items-center gap-2"
+                        className="app-action-button app-download-button inline-flex items-center gap-2"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -5939,16 +6957,8 @@ function App() {
                         title="Thiết lập mức lương tối thiểu, bảo hiểm và thuế theo ngày hiệu lực"
                         className="app-action-button inline-flex items-center gap-2"
                       >
-                        <span aria-hidden="true">⚙</span>
+                        <AppIcon name="settings" size={16} />
                         Chính sách lương
-                      </button>
-                      <button
-                        type="button"
-                        onClick={togglePublishSalaryPeriod}
-                        disabled={loading || salaryInputs.length === 0}
-                        className="app-action-button"
-                      >
-                        {isPeriodPublished ? 'Thu hồi phiếu lương' : 'Phát hành phiếu lương'}
                       </button>
                     </>
                   )}
@@ -5959,8 +6969,8 @@ function App() {
                       setEditedInputs({})
                     }
                     setMessage(willLock
-                      ? `🔒 Đã khóa bảng lương tháng ${salaryPeriod} — không thể chỉnh sửa thêm.`
-                      : `🔓 Đã mở khóa bảng lương tháng ${salaryPeriod}.`
+                      ? `Đã khóa bảng lương tháng ${salaryPeriod} — không thể chỉnh sửa thêm.`
+                      : `Đã mở khóa bảng lương tháng ${salaryPeriod}.`
                     )
                   }}
                   onCellChange={(empId, field, value) => {
@@ -5974,6 +6984,7 @@ function App() {
                 {/* Save bar — hiện khi có chỉnh sửa */}
                 {/* Control bar — luôn hiển thị để chứa nút Xác nhận */}
                 <div
+                  id="salary-approval-actions"
                   style={{
                     position: 'sticky', bottom: 0, zIndex: 30,
                     background: 'linear-gradient(135deg, #163b66 0%, #1d4ed8 100%)',
@@ -5984,9 +6995,9 @@ function App() {
                 >
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#ffffff' }}>
                     {Object.keys(editedInputs).length > 0 ? (
-                      <>✏️ Có <b style={{ color: '#fde68a' }}>{Object.keys(editedInputs).length}</b> nhân viên vừa chỉnh sửa — chưa lưu vào cơ sở dữ liệu</>
+                      <><AppIcon name="edit" size={15} /> Có <b style={{ color: '#fde68a' }}>{Object.keys(editedInputs).length}</b> nhân viên vừa chỉnh sửa — chưa lưu vào cơ sở dữ liệu</>
                     ) : (
-                      <>✨ Hệ thống sẵn sàng. Đã tải thông tin bảng lương tháng {salaryPeriod}.</>
+                      <><AppIcon name="sparkle" size={15} /> Hệ thống sẵn sàng. Đã tải thông tin bảng lương tháng {salaryPeriod}.</>
                     )}
                   </span>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -6001,7 +7012,7 @@ function App() {
                             color: '#ffffff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                           }}
                         >
-                          ↶ Hoàn tác thay đổi chưa lưu
+                          <AppIcon name="undo" size={15} /> Hoàn tác thay đổi chưa lưu
                         </button>
                         <button
                           type="button"
@@ -6016,15 +7027,16 @@ function App() {
                             opacity: isSalaryLocked ? 0.5 : 1,
                           }}
                         >
-                          💾 Lưu vào DB
+                          <AppIcon name="save" size={16} /> Lưu vào DB
                         </button>
                       </>
                     )}
 
                     <button
                       type="button"
+                      className="salary-undo-last-button"
                       onClick={undoLastSavedSalaryInputs}
-                      disabled={loading || isSalaryConfirmed || isSalaryLocked || lastSalaryUndo?.salaryPeriod !== salaryPeriod}
+                      disabled={loading || isSalaryLocked || lastSalaryUndo?.salaryPeriod !== salaryPeriod}
                       title={lastSalaryUndo?.salaryPeriod === salaryPeriod
                         ? 'Khôi phục dữ liệu trước lần lưu gần nhất trong phiên làm việc này'
                         : 'Chưa có lần lưu nào trong phiên này để hoàn tác'}
@@ -6032,42 +7044,98 @@ function App() {
                         height: 34, padding: '0 14px', borderRadius: 8,
                         background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)',
                         color: '#ffffff', fontSize: 12, fontWeight: 700,
-                        cursor: (loading || isSalaryConfirmed || isSalaryLocked || lastSalaryUndo?.salaryPeriod !== salaryPeriod) ? 'not-allowed' : 'pointer',
-                        opacity: (isSalaryConfirmed || isSalaryLocked || lastSalaryUndo?.salaryPeriod !== salaryPeriod) ? 0.5 : 1,
+                        cursor: (loading || isSalaryLocked || lastSalaryUndo?.salaryPeriod !== salaryPeriod) ? 'not-allowed' : 'pointer',
+                        opacity: 1,
                       }}
                     >
-                      ↶ Hoàn tác lần lưu gần nhất
+                      <AppIcon name="undo" size={15} /> Hoàn tác lần lưu gần nhất
                     </button>
 
-                    {/* Nút Xác nhận bảng lương */}
-                    <button
-                      type="button"
-                      className={`salary-confirm-button${isSalaryConfirmed ? ' is-confirmed' : ''}`}
-                      onClick={() => {
-                        setIsSalaryConfirmed(true)
-                        setMessage(`✅ Đã xác nhận bảng lương tháng ${salaryPeriod}.`)
-                      }}
-                      disabled={loading || isSalaryConfirmed || isSalaryLocked}
-                      title={isSalaryConfirmed ? 'Bảng lương đã được xác nhận' : 'Xác nhận hoàn tất bảng lương tháng này'}
-                      style={{
-                        height: 34, padding: '0 18px', borderRadius: 8,
-                        background: isSalaryConfirmed ? '#6b7280' : '#f59e0b',
-                        border: 'none',
-                        color: '#ffffff', fontSize: 12, fontWeight: 700,
-                        cursor: (loading || isSalaryConfirmed || isSalaryLocked) ? 'not-allowed' : 'pointer',
-                        boxShadow: isSalaryConfirmed ? 'none' : '0 4px 12px rgba(245,158,11,0.45)',
-                        opacity: (isSalaryConfirmed || isSalaryLocked) ? 0.75 : 1,
-                        transition: 'all 0.2s ease',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      <span className="salary-confirm-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none">
-                          <path d="m5 12 4 4L19 6" />
-                        </svg>
-                      </span>
-                      {isSalaryConfirmed ? 'Đã xác nhận' : 'Xác nhận bảng lương'}
-                    </button>
+                    {currentUser?.role === 'ADMIN' && (
+                      <>
+                        <button
+                          type="button"
+                          className={`salary-confirm-button${salaryApproval?.status !== 'DRAFT' ? ' is-confirmed' : ''}`}
+                          onClick={() => void confirmSalaryPeriod()}
+                          disabled={loading || salaryApproval?.status !== 'DRAFT' || isSalaryLocked || Object.keys(editedInputs).length > 0}
+                          title={salaryApproval?.status !== 'DRAFT'
+                            ? 'Số liệu bảng lương đã được Kế toán trưởng xác nhận; phiếu lương chưa phát hành'
+                            : Object.keys(editedInputs).length > 0
+                              ? 'Hãy lưu các thay đổi vào DB trước khi xác nhận'
+                              : 'Xác nhận số liệu bảng lương, chưa phát hành phiếu lương'}
+                          style={{
+                            height: 34, padding: '0 18px', borderRadius: 8,
+                            background: salaryApproval?.status !== 'DRAFT' ? '#64748b' : '#f59e0b',
+                            border: '1px solid rgba(255,255,255,0.45)',
+                            color: '#ffffff', fontSize: 12, fontWeight: 700,
+                            cursor: (loading || salaryApproval?.status !== 'DRAFT' || isSalaryLocked || Object.keys(editedInputs).length > 0) ? 'not-allowed' : 'pointer',
+                            boxShadow: salaryApproval?.status === 'DRAFT' ? '0 4px 12px rgba(245,158,11,0.45)' : 'none',
+                            opacity: salaryApproval?.status !== 'DRAFT' ? 0.75 : 1,
+                            transition: 'all 0.2s ease', whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <AppIcon name="check" size={15} />
+                          {salaryApproval?.status === 'DRAFT' ? 'Xác nhận bảng lương' : 'Đã xác nhận số liệu'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void requestSalaryApproval()}
+                          disabled={loading || salaryApproval?.status !== 'CONFIRMED'}
+                          title={salaryApproval?.status === 'CONFIRMED'
+                            ? 'Gửi yêu cầu tới hai Giám đốc và IT_ADMIN'
+                            : salaryApproval?.status === 'PENDING_APPROVAL'
+                              ? 'Yêu cầu đang chờ Giám đốc hoặc IT_ADMIN phê duyệt'
+                              : salaryApproval?.status === 'APPROVED'
+                                ? 'Bảng lương đã được phê duyệt và phát hành'
+                                : 'Cần xác nhận số liệu trước khi gửi yêu cầu phê duyệt'}
+                          style={{
+                            height: 34, padding: '0 18px', borderRadius: 8,
+                            background: salaryApproval?.status === 'CONFIRMED' ? '#10b981' : 'rgba(255,255,255,0.15)',
+                            border: '1px solid rgba(255,255,255,0.45)', color: '#ffffff',
+                            fontSize: 12, fontWeight: 700,
+                            cursor: (loading || salaryApproval?.status !== 'CONFIRMED') ? 'not-allowed' : 'pointer',
+                            opacity: salaryApproval?.status === 'CONFIRMED' ? 1 : 0.65,
+                            boxShadow: salaryApproval?.status === 'CONFIRMED' ? '0 4px 12px rgba(16,185,129,0.4)' : 'none',
+                            transition: 'all 0.2s ease', whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <AppIcon name="message" size={15} />
+                          {salaryApproval?.status === 'PENDING_APPROVAL'
+                            ? 'Đang chờ phê duyệt'
+                            : salaryApproval?.status === 'APPROVED'
+                              ? 'Đã được phê duyệt'
+                              : 'Yêu cầu phê duyệt'}
+                        </button>
+                      </>
+                    )}
+
+                    {(currentUser?.role === 'DIRECTOR' || currentUser?.role === 'IT_ADMIN') && (
+                      <button
+                        id="salary-approve-publish-button"
+                        type="button"
+                        className={`salary-confirm-button${salaryApproval?.status === 'APPROVED' ? ' is-confirmed' : ''}`}
+                        onClick={() => void approveSalaryPeriod()}
+                        disabled={loading || salaryApproval?.status !== 'PENDING_APPROVAL'}
+                        title={salaryApproval?.status === 'PENDING_APPROVAL'
+                          ? 'Phê duyệt để tự động phát hành phiếu lương và thông báo nhân viên'
+                          : salaryApproval?.status === 'APPROVED'
+                            ? 'Bảng lương đã được phê duyệt và phát hành'
+                            : 'Chưa có yêu cầu phê duyệt từ Kế toán trưởng'}
+                        style={{
+                          height: 34, padding: '0 18px', borderRadius: 8,
+                          background: salaryApproval?.status === 'PENDING_APPROVAL' ? '#10b981' : '#64748b',
+                          border: '1px solid rgba(255,255,255,0.45)', color: '#ffffff',
+                          fontSize: 12, fontWeight: 700,
+                          cursor: (loading || salaryApproval?.status !== 'PENDING_APPROVAL') ? 'not-allowed' : 'pointer',
+                          opacity: 1,
+                          boxShadow: salaryApproval?.status === 'PENDING_APPROVAL' ? '0 4px 12px rgba(16,185,129,0.4)' : 'none',
+                          transition: 'all 0.2s ease', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        <AppIcon name="check" size={15} />
+                        {salaryApproval?.status === 'APPROVED' ? 'Đã phê duyệt & phát hành' : 'Phê duyệt & phát hành'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -6152,6 +7220,7 @@ function App() {
                                   <option value="FULLTIME">Chính thức (FULLTIME)</option>
                                   <option value="PROBATION">Thử việc (PROBATION)</option>
                                   <option value="INTERN">Học việc (INTERN)</option>
+                                  <option value="TRAINEE">Thực tập (TRAINEE)</option>
                                 </select>
                               ) : (
                                 <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${emp.employee_type === 'FULLTIME' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
@@ -6236,6 +7305,7 @@ function App() {
                   apiBase={apiBase}
                   token={token}
                   notificationFocus={commissionNotificationFocus}
+                  externalRefreshVersion={lastDataChange?.path.startsWith('/api/commission') ? lastDataChange.occurredAt : 0}
                 />
               </div>
             )}
@@ -6243,10 +7313,62 @@ function App() {
           </section>
         )}
 
+      {dashboardTrendOpen && dashboardKpi && createPortal(
+        <div className="modal-backdrop dashboard-trend-backdrop" onMouseDown={() => setDashboardTrendOpen(false)}>
+          <section
+            className="dashboard-trend-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dashboard-trend-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="dashboard-trend-modal-header">
+              <div>
+                <h2 id="dashboard-trend-title">Xu hướng theo ngày</h2>
+                <p>{periodStart} → {periodEnd} · {dashboardKpi.trend.length} ngày có dữ liệu</p>
+              </div>
+              <button type="button" className="app-close-button" aria-label="Đóng chi tiết xu hướng" onClick={() => setDashboardTrendOpen(false)}>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </header>
+            <div className="dashboard-trend-modal-body">
+              <div className="table-wrap compact">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ngày</th>
+                      <th>Đi làm</th>
+                      <th>Vắng</th>
+                      <th>Bất thường</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboardKpi.trend.map((point) => (
+                      <tr key={point.work_date}>
+                        <td>{point.work_date}</td>
+                        <td>{point.present_count}</td>
+                        <td>{point.absent_count}</td>
+                        <td>{point.abnormal_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <footer className="dashboard-trend-modal-footer">
+              <button type="button" onClick={() => setDashboardTrendOpen(false)}>Đóng</button>
+            </footer>
+          </section>
+        </div>,
+        document.body,
+      )}
+
       {detailEmployee && createPortal(
-        <div className="modal-backdrop transition-opacity duration-300 animate-[modalBackdropIn_0.3s_ease-out_forwards]" onClick={() => setDetailEmployee(null)}>
+        <div className="modal-backdrop employee-detail-backdrop transition-opacity duration-300 animate-[modalBackdropIn_0.3s_ease-out_forwards]" onClick={() => setDetailEmployee(null)}>
           <div
-            className="modal-card rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] max-w-2xl w-full transition-all duration-300 ease-out transform scale-95 opacity-0 animate-[modalPopIn_0.3s_ease-out_forwards]"
+            className="modal-card employee-detail-modal rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] max-w-2xl w-full transition-all duration-300 ease-out transform scale-95 opacity-0 animate-[modalPopIn_0.3s_ease-out_forwards]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-6 flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
@@ -6265,10 +7387,10 @@ function App() {
               </button>
             </div>
 
-            <div className="max-h-[70vh] overflow-y-auto px-1 space-y-6">
+            <div className="px-1 space-y-6">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Thông tin nhận diện &amp; công việc</p>
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="employee-detail-grid grid grid-cols-2 gap-4 text-sm">
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Tên nhân viên</span>
                     <input className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.full_name} onChange={(e) => setDetailEmployee({ ...detailEmployee, full_name: e.target.value })} placeholder="Tên trên báo cáo chấm công" />
@@ -6280,10 +7402,6 @@ function App() {
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Mã máy chấm công</span>
                     <input className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.machine_employee_id} onChange={(e) => setDetailEmployee({ ...detailEmployee, machine_employee_id: e.target.value })} />
-                  </label>
-                  <label>
-                    <span className="block text-xs font-semibold text-slate-400 uppercase">Mã vân tay</span>
-                    <input className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.biometric_id || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, biometric_id: e.target.value })} placeholder="Có thể bổ sung sau" />
                   </label>
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Mã nhân viên</span>
@@ -6306,16 +7424,70 @@ function App() {
                   </label>
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Ngày bắt đầu làm việc</span>
-                    <input type="date" className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.start_date?.split('T')[0] || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, start_date: e.target.value })} />
+                    <BrandedDateInput className="mt-1" value={detailEmployee.start_date?.split('T')[0] || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, start_date: e.target.value })} />
                   </label>
                   <label>
+                    <span className="block text-xs font-semibold text-slate-400 uppercase">Loại hợp đồng</span>
+                    <select
+                      className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1"
+                      value={detailEmployee.contract_type || ''}
+                      onChange={(e) => setDetailEmployee({
+                        ...detailEmployee,
+                        contract_type: e.target.value || null,
+                        contract_sign_date: e.target.value ? detailEmployee.contract_sign_date : null,
+                        contract_start_date: isFixedTermEmployeeContract(e.target.value) ? detailEmployee.contract_start_date : null,
+                        contract_end_date: isFixedTermEmployeeContract(e.target.value) ? detailEmployee.contract_end_date : null,
+                      })}
+                    >
+                      <option value="">Chưa thiết lập</option>
+                      {EMPLOYEE_CONTRACT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="block text-xs font-semibold text-slate-400 uppercase">Ngày ký hợp đồng</span>
+                    <BrandedDateInput disabled={!detailEmployee.contract_type} required={Boolean(detailEmployee.contract_type)} className="mt-1" value={detailEmployee.contract_sign_date || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, contract_sign_date: e.target.value || null })} />
+                  </label>
+                  {isFixedTermEmployeeContract(detailEmployee.contract_type) && (
+                    <>
+                      <label>
+                        <span className="block text-xs font-semibold text-slate-400 uppercase">Hợp đồng từ ngày</span>
+                        <BrandedDateInput className="mt-1" value={detailEmployee.contract_start_date || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, contract_start_date: e.target.value || null })} />
+                      </label>
+                      <label>
+                        <span className="block text-xs font-semibold text-slate-400 uppercase">Hợp đồng đến ngày</span>
+                        <BrandedDateInput min={detailEmployee.contract_start_date || undefined} className="mt-1" value={detailEmployee.contract_end_date || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, contract_end_date: e.target.value || null })} />
+                      </label>
+                    </>
+                  )}
+                  <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Trạng thái</span>
-                    <select className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.status} onChange={(e) => setDetailEmployee({ ...detailEmployee, status: e.target.value, is_active: e.target.value === 'ACTIVE' })}>
+                    <select className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.status} onChange={(e) => setDetailEmployee({
+                      ...detailEmployee,
+                      status: e.target.value,
+                      is_active: e.target.value === 'ACTIVE',
+                      ...(e.target.value !== 'RESIGNED' ? { resignation_period: null, last_working_date: null, last_pay_date: null } : {}),
+                    })}>
                       <option value="ACTIVE">Đang hoạt động</option>
                       <option value="LOCKED">Tạm khóa</option>
                       <option value="RESIGNED">Đã nghỉ việc</option>
                     </select>
                   </label>
+                  {detailEmployee.status === 'RESIGNED' && (
+                    <>
+                      <label>
+                        <span className="block text-xs font-semibold text-slate-400 uppercase">Ngày làm việc cuối</span>
+                        <BrandedDateInput className="mt-1" value={detailEmployee.last_working_date || ''} onChange={(e) => setDetailEmployee({
+                          ...detailEmployee,
+                          last_working_date: e.target.value || null,
+                          resignation_period: e.target.value ? e.target.value.slice(0, 7) : null,
+                        })} />
+                      </label>
+                      <label>
+                        <span className="block text-xs font-semibold text-slate-400 uppercase">Ngày trả lương cuối</span>
+                        <BrandedDateInput className="mt-1" value={detailEmployee.last_pay_date || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, last_pay_date: e.target.value || null })} />
+                      </label>
+                    </>
+                  )}
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Loại nhân viên</span>
                     <select
@@ -6337,13 +7509,13 @@ function App() {
                       <option value="FULLTIME">Chính thức</option>
                       <option value="PROBATION">Thử việc</option>
                       <option value="INTERN">Học việc</option>
+                      <option value="TRAINEE">Thực tập</option>
                     </select>
                   </label>
                   {detailEmployeeOriginalType && detailEmployee.employee_type !== detailEmployeeOriginalType && (
                     <label>
                       <span className="block text-xs font-semibold text-slate-400 uppercase">Ngày áp dụng thăng tiến</span>
-                      <input
-                        type="date"
+                      <BrandedDateInput
                         required
                         className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1"
                         value={detailEmployeeTypeEffectiveDate}
@@ -6368,8 +7540,8 @@ function App() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">👤 Thông tin cá nhân & Liên hệ</p>
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <p className="mb-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"><AppIcon name="user" size={15} /> Thông tin cá nhân &amp; Liên hệ</p>
+                <div className="employee-detail-grid grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Mã số thuế (MST)</span>
                     <input
@@ -6430,7 +7602,14 @@ function App() {
                       type="email"
                       className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none transition focus:border-[#163B66] focus:ring-4 focus:ring-[#163B66]/10 mt-1"
                       value={detailEmployee.company_email || ''}
-                      onChange={(e) => setDetailEmployee({ ...detailEmployee, company_email: e.target.value })}
+                      onChange={(e) => {
+                        const companyEmail = e.target.value
+                        setDetailEmployee({
+                          ...detailEmployee,
+                          company_email: companyEmail,
+                          username: usernameFromCompanyEmail(companyEmail),
+                        })
+                      }}
                       placeholder="nv.a@sealink.com"
                     />
                   </div>
@@ -6460,21 +7639,27 @@ function App() {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Tài khoản đăng nhập (tùy chọn)</p>
                 <p className="mb-4 text-xs text-slate-500">Nhân viên chưa có tài khoản có thể để trống. Khi tạo mới, nhập đồng thời tên đăng nhập và mật khẩu.</p>
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="employee-detail-grid grid grid-cols-2 gap-4 text-sm">
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Tên đăng nhập</span>
-                    <input className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.username || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, username: e.target.value })} placeholder="Có thể bổ sung sau" />
+                    <input className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.username || ''} readOnly placeholder="Tự động từ mail công ty" title="Tên đăng nhập được tạo tự động từ phần trước @ của mail công ty" />
                   </label>
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Mật khẩu mới</span>
-                    <input type="password" className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployeePassword} onChange={(e) => setDetailEmployeePassword(e.target.value)} placeholder={detailEmployee.username ? 'Để trống nếu giữ nguyên' : 'Tối thiểu 12 ký tự'} />
+                    <EmployeePasswordField
+                      value={detailEmployeePassword}
+                      onChange={setDetailEmployeePassword}
+                      onNotice={setMessage}
+                      inputClassName="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1"
+                      placeholder={detailEmployee.account_role ? 'Để trống nếu giữ nguyên' : 'Tối thiểu 12 ký tự'}
+                    />
                   </label>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Cấu hình lương &amp; phụ cấp ban đầu</p>
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="employee-detail-grid grid grid-cols-2 gap-4 text-sm">
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Lương hợp đồng</span>
                     <VndInput className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm text-right mt-1" value={detailEmployee.contract_salary} onValueChange={(value) => setDetailEmployee({ ...detailEmployee, contract_salary: value })} />
@@ -6503,7 +7688,7 @@ function App() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">📄 Hồ sơ & Tài liệu đính kèm</p>
+                <p className="mb-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"><AppIcon name="document" size={15} /> Hồ sơ &amp; Tài liệu đính kèm</p>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="block text-xs font-semibold text-slate-400 uppercase mb-2">CCCD / CMND</span>
@@ -6535,7 +7720,7 @@ function App() {
                               <button
                                 type="button"
                                 onClick={() => openDocument(url, true)}
-                                className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center" 
+                                className="app-download-button p-1.5 rounded-lg transition-colors flex items-center justify-center"
                                 title="Tải xuống"
                               >
                                 <svg className="w-4 h-4 text-slate-500 hover:text-green-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -6556,8 +7741,12 @@ function App() {
                         ))
                       )}
                     </div>
-                    <label className="cursor-pointer inline-flex items-center justify-center h-8 px-4 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">
-                      Tải lên CCCD mới
+                    <label
+                      className="employee-document-upload cursor-pointer h-8 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+                      aria-label="Tải lên CCCD mới"
+                      title="Tải lên CCCD mới"
+                    >
+                      <AppIcon name="upload" size={16} />
                       <input 
                         type="file" 
                         multiple
@@ -6601,7 +7790,7 @@ function App() {
                               <button
                                 type="button"
                                 onClick={() => openDocument(url, true)}
-                                className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center" 
+                                className="app-download-button p-1.5 rounded-lg transition-colors flex items-center justify-center"
                                 title="Tải xuống"
                               >
                                 <svg className="w-4 h-4 text-slate-500 hover:text-green-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -6622,8 +7811,12 @@ function App() {
                         ))
                       )}
                     </div>
-                    <label className="cursor-pointer inline-flex items-center justify-center h-8 px-4 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">
-                      Tải lên Chứng từ mới
+                    <label
+                      className="employee-document-upload cursor-pointer h-8 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+                      aria-label="Tải lên Chứng từ mới"
+                      title="Tải lên Chứng từ mới"
+                    >
+                      <AppIcon name="upload" size={16} />
                       <input 
                         type="file" 
                         multiple
@@ -6641,8 +7834,8 @@ function App() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">🏦 Thông tin ngân hàng</p>
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <p className="mb-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"><AppIcon name="bank" size={15} /> Thông tin ngân hàng</p>
+                <div className="employee-detail-grid grid grid-cols-2 gap-4 text-sm">
                   <label>
                     <span className="block text-xs font-semibold text-slate-400 uppercase">Tên ngân hàng</span>
                     <input className="h-9 w-full rounded-xl border border-slate-200 px-3 text-sm mt-1" value={detailEmployee.bank_name || ''} onChange={(e) => setDetailEmployee({ ...detailEmployee, bank_name: e.target.value })} placeholder="Có thể bổ sung sau" />
@@ -6666,14 +7859,14 @@ function App() {
             <div className="mt-6 flex flex-row items-center justify-end gap-3 pt-4 border-t border-slate-100">
               <button
                 type="button"
-                className="inline-flex h-[44px] min-w-[120px] items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="employee-detail-footer-button inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 onClick={() => setDetailEmployee(null)}
               >
                 Đóng
               </button>
               <button
                 type="button"
-                className={`sl-btn-action sl-color-blue ${loading ? 'loading-shimmer' : ''} inline-flex h-[44px] items-center justify-center rounded-xl px-6 font-semibold`}
+                className={`employee-detail-footer-button sl-btn-action sl-color-blue ${loading ? 'loading-shimmer' : ''} inline-flex items-center justify-center rounded-xl px-6 text-sm font-semibold`}
                 onClick={saveEmployeeDetail}
                 disabled={loading}
               >
@@ -6686,9 +7879,9 @@ function App() {
       )}
 
       {isEmployeeModalOpen && (
-        <div className="modal-backdrop transition-opacity duration-300 animate-[modalBackdropIn_0.3s_ease-out_forwards]" onClick={() => setIsEmployeeModalOpen(false)}>
+        <div className="modal-backdrop employee-create-backdrop transition-opacity duration-300 animate-[modalBackdropIn_0.3s_ease-out_forwards]" onClick={() => setIsEmployeeModalOpen(false)}>
           <form
-            className="modal-card rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] max-w-2xl transition-all duration-300 ease-out transform scale-95 opacity-0 animate-[modalPopIn_0.3s_ease-out_forwards]"
+            className="modal-card employee-create-modal rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] max-w-2xl transition-all duration-300 ease-out transform scale-95 opacity-0 animate-[modalPopIn_0.3s_ease-out_forwards]"
             onClick={(event) => event.stopPropagation()}
             onSubmit={createEmployee}
           >
@@ -6706,7 +7899,7 @@ function App() {
                 onClick={() => setIsEmployeeModalOpen(false)}
                 className="app-close-button"
               >
-                ×
+                <AppIcon name="close" size={17} />
               </button>
             </div>
 
@@ -6725,7 +7918,7 @@ function App() {
                 gap: '8px',
                 width: '100%'
               }}>
-                <span style={{ fontSize: '16px' }}>⚠️</span>
+                <AppIcon name="warning" size={17} />
                 <span>{employeeError}</span>
                 <button
                   type="button" 
@@ -6733,7 +7926,7 @@ function App() {
                   className="app-close-button app-close-button--compact"
                   style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#b91c1c', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}
                 >
-                  ×
+                  <AppIcon name="close" size={14} />
                 </button>
               </div>
             )}
@@ -6742,13 +7935,14 @@ function App() {
             <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Thông tin nhận diện</p>
             <div className="grid gap-4 md:grid-cols-2">
               <label>
-                ID máy chấm công <span className="text-rose-500">*</span>
+                <span>ID máy chấm công <span className="text-rose-500">*</span></span>
                 <input
                   value={employeeForm.machine_employee_id}
                   onChange={(e) => setEmployeeForm((prev) => ({ ...prev, machine_employee_id: e.target.value }))}
                   placeholder="Ví dụ: E001"
                   required
                 />
+                <span className="mt-1 block text-xs font-normal text-slate-500">Đây là ID duy nhất dùng để đối chiếu dữ liệu từ máy chấm công.</span>
               </label>
               <label>
                 Phòng ban
@@ -6807,8 +8001,7 @@ function App() {
               </label>
               <label>
                 Ngày bắt đầu làm việc
-                <input
-                  type="date"
+                <BrandedDateInput
                   value={employeeForm.start_date}
                   onChange={(e) => setEmployeeForm((prev) => ({ ...prev, start_date: e.target.value }))}
                 />
@@ -6817,7 +8010,7 @@ function App() {
 
             {/* SALARY CONFIGURATION */}
             <div className="mt-5 rounded-2xl border border-[#163B66]/15 bg-[#163B66]/[0.03] p-5">
-              <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#163B66]/70">⚙ Cấu hình lương &amp; hợp đồng</p>
+              <p className="mb-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#163B66]/70"><AppIcon name="settings" size={15} /> Cấu hình lương &amp; hợp đồng</p>
               <div className="grid gap-4 md:grid-cols-2">
                 <label>
                   Mã nhân viên (theo HĐ)
@@ -6836,6 +8029,67 @@ function App() {
                   />
                 </label>
                 <label>
+                  Loại hợp đồng
+                  <select
+                    value={employeeForm.contract_type}
+                    onChange={(e) => setEmployeeForm((prev) => ({
+                      ...prev,
+                      contract_type: e.target.value,
+                      contract_start_date: isFixedTermEmployeeContract(e.target.value) ? prev.contract_start_date : '',
+                      contract_end_date: isFixedTermEmployeeContract(e.target.value) ? prev.contract_end_date : '',
+                    }))}
+                  >
+                    <option value="">-- Chọn loại hợp đồng --</option>
+                    {EMPLOYEE_CONTRACT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Loại nhân viên
+                  <select
+                    value={employeeForm.employee_type}
+                    onChange={(e) => setEmployeeForm((prev) => ({
+                      ...prev,
+                      employee_type: e.target.value,
+                      ...getContractAllowanceDefaults(e.target.value),
+                    }))}
+                  >
+                    <option value="FULLTIME">Chính thức (full BH + thuế lũy tiến)</option>
+                    <option value="PROBATION">Thử việc (không BH + khấu trừ 10%)</option>
+                    <option value="INTERN">Học việc (không BH + khấu trừ 10%)</option>
+                    <option value="TRAINEE">Thực tập (Khối C, không tính lương)</option>
+                  </select>
+                </label>
+                <label>
+                  Ngày ký hợp đồng
+                  <BrandedDateInput
+                    value={employeeForm.contract_sign_date}
+                    disabled={!employeeForm.contract_type}
+                    required={Boolean(employeeForm.contract_type)}
+                    onChange={(e) => setEmployeeForm((prev) => ({ ...prev, contract_sign_date: e.target.value }))}
+                  />
+                </label>
+                {isFixedTermEmployeeContract(employeeForm.contract_type) && (
+                  <>
+                    <label>
+                      Hợp đồng từ ngày
+                      <BrandedDateInput
+                        value={employeeForm.contract_start_date}
+                        required
+                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, contract_start_date: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Hợp đồng đến ngày
+                      <BrandedDateInput
+                        value={employeeForm.contract_end_date}
+                        min={employeeForm.contract_start_date || undefined}
+                        required
+                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, contract_end_date: e.target.value }))}
+                      />
+                    </label>
+                  </>
+                )}
+                <label>
                   Lương theo HĐLĐ (VND)
                   <VndInput
                     value={employeeForm.contract_salary}
@@ -6852,21 +8106,6 @@ function App() {
                     placeholder="Ví dụ: 1200000"
                     style={{ textAlign: 'right' }}
                   />
-                </label>
-                <label>
-                  Loại nhân viên
-                  <select
-                    value={employeeForm.employee_type}
-                    onChange={(e) => setEmployeeForm((prev) => ({
-                      ...prev,
-                      employee_type: e.target.value,
-                      ...getContractAllowanceDefaults(e.target.value),
-                    }))}
-                  >
-                    <option value="FULLTIME">Chính thức (full BH + thuế lũy tiến)</option>
-                    <option value="PROBATION">Thử việc (không BH + khấu trừ 10%)</option>
-                    <option value="INTERN">Học việc (không BH + khấu trừ 10%)</option>
-                  </select>
                 </label>
                 <label>
                   Tiền điện thoại (VND/tháng)
@@ -6916,31 +8155,32 @@ function App() {
                 </label>
               </div>
               <div className="mt-4 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs leading-5 text-sky-900">
-                <strong>Quyền hệ thống dự kiến: {ACCESS_ROLE_LABELS[inferAccessRolePreview(employeeForm.department_name, employeeForm.position)]}</strong>
+                <strong>Quyền hệ thống dự kiến: {ACCESS_ROLE_LABELS[inferAccessRolePreview(employeeForm.department_name, employeeForm.position, employeeForm.full_name)]}</strong>
                 <br />
-                Quyền không chọn thủ công: “Admin” trong nhánh IT &amp; ADMIN nhận HR_ADMIN; nhân viên IT dùng tài khoản quản trị chung admin_sealink; trường hợp khác nhận USER.
+                Quyền không chọn thủ công: Tôn Thất Trung Kiên và Tô Tố Vân nhận DIRECTOR; “Admin” trong nhánh IT &amp; ADMIN nhận HR_ADMIN; nhân viên IT dùng tài khoản quản trị chung admin_sealink; trường hợp khác nhận USER.
               </div>
             </div>
 
             {/* ACCOUNT LOGIN INFO */}
             <div className="mt-4 rounded-2xl border border-slate-200 bg-[#0ea5e9]/[0.02] p-5">
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#0284c7] font-bold">👤 Thông tin tài khoản đăng nhập (không bắt buộc)</p>
+              <p className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#0284c7] font-bold"><AppIcon name="user" size={15} /> Thông tin tài khoản đăng nhập (không bắt buộc)</p>
               <p className="mb-4 text-xs text-slate-500">Có thể để trống và bổ sung tài khoản sau khi hoàn tất mapping nhân viên.</p>
               <div className="grid gap-4 md:grid-cols-2">
                 <label>
                   Tên đăng nhập (Username)
                   <input
                     value={employeeForm.username}
-                    onChange={(e) => setEmployeeForm((prev) => ({ ...prev, username: e.target.value }))}
-                    placeholder="Để trống nếu chưa tạo tài khoản"
+                    readOnly
+                    placeholder="Tự động từ mail công ty"
+                    title="Tên đăng nhập được tạo tự động từ phần trước @ của mail công ty"
                   />
                 </label>
                 <label>
                   Mật khẩu (Password)
-                  <input
-                    type="password"
+                  <EmployeePasswordField
                     value={employeeForm.password}
-                    onChange={(e) => setEmployeeForm((prev) => ({ ...prev, password: e.target.value }))}
+                    onChange={(value) => setEmployeeForm((prev) => ({ ...prev, password: value }))}
+                    onNotice={setMessage}
                     placeholder="Để trống nếu chưa tạo tài khoản"
                   />
                 </label>
@@ -6949,7 +8189,7 @@ function App() {
 
             {/* BANK INFO */}
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-              <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">🏦 Thông tin ngân hàng</p>
+              <p className="mb-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"><AppIcon name="bank" size={15} /> Thông tin ngân hàng</p>
               <div className="grid gap-4 md:grid-cols-2">
                 <label>
                   Tên ngân hàng
@@ -6972,7 +8212,7 @@ function App() {
 
             {/* PERSONAL INFO */}
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-              <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">👤 Thông tin cá nhân & Liên hệ</p>
+              <p className="mb-4 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"><AppIcon name="user" size={15} /> Thông tin cá nhân &amp; Liên hệ</p>
               <div className="grid gap-4 md:grid-cols-2">
                 <label>
                   Mã số thuế (MST)
@@ -7027,7 +8267,14 @@ function App() {
                   <input
                     type="email"
                     value={employeeForm.company_email}
-                    onChange={(e) => setEmployeeForm((prev) => ({ ...prev, company_email: e.target.value }))}
+                    onChange={(e) => {
+                      const companyEmail = e.target.value
+                      setEmployeeForm((prev) => ({
+                        ...prev,
+                        company_email: companyEmail,
+                        username: usernameFromCompanyEmail(companyEmail),
+                      }))
+                    }}
                     placeholder="Ví dụ: nv.a@sealink.com"
                   />
                 </label>
@@ -7078,26 +8325,27 @@ function App() {
 
 
         {activeTab === 'my-payslip' && (
-          <section className="space-y-6 max-w-4xl mx-auto animate-[fadeIn_0.3s_ease-out_forwards]">
+          <section className="mobile-payslip-page space-y-6 max-w-4xl mx-auto animate-[fadeIn_0.3s_ease-out_forwards]">
             {/* Period selector */}
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="mobile-payslip-toolbar rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 tracking-tight">Chọn tháng thanh toán lương</h2>
                 <p className="text-xs text-slate-500 mt-1">Chọn tháng cần xem chi tiết phiếu lương của bạn.</p>
               </div>
-              <div className="flex items-center gap-3">
-                <select
+              <div className="mobile-payslip-toolbar__actions flex flex-wrap items-end gap-3">
+                <MonthYearSelect
+                  id="my-payslip-period"
                   value={myPayslipPeriod}
-                  onChange={(e) => {
-                    setMyPayslipPeriod(e.target.value)
+                  availablePeriods={myPayslipPeriodOptions}
+                  onChange={(period) => {
+                    setMyPayslipPeriod(period)
                     setPayslipPdfStatus(null)
                   }}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-4 py-2.5 text-sm font-semibold outline-none focus:border-slate-300"
-                >
-                  {myPayslipPeriodOptions.length > 0
-                    ? myPayslipPeriodOptions.map((period) => <option key={period} value={period}>{formatMonthOption(period)}</option>)
-                    : <option value="">Chưa có phiếu lương được phát hành</option>}
-                </select>
+                  disabled={myPayslipPeriodOptions.length === 0}
+                  emptyLabel="Chưa có phiếu lương"
+                  yearLabel="Năm phiếu lương"
+                  monthLabel="Tháng phiếu lương"
+                />
                 <button
                   type="button"
                   onClick={loadMyPayslip}
@@ -7110,7 +8358,7 @@ function App() {
                   type="button"
                   onClick={downloadMyPayslipPdf}
                   disabled={!myPayslipData || isDownloadingPayslip}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#163b66] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#102b49] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="app-download-button inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50"
                   title={myPayslipData ? 'Tải phiếu lương đang hiển thị dưới dạng PDF' : 'Chọn tháng có phiếu lương đã phát hành để tải PDF'}
                 >
                   {isDownloadingPayslip ? (
@@ -7232,7 +8480,7 @@ function App() {
               };
 
               return (
-                <div ref={myPayslipPdfRef} className="rounded-[32px] border border-slate-200 bg-white p-8 sm:p-12 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.15)] space-y-8 relative overflow-hidden text-slate-800">
+                <div ref={myPayslipPdfRef} className="mobile-payslip-document rounded-[32px] border border-slate-200 bg-white p-8 sm:p-12 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.15)] space-y-8 relative overflow-hidden text-slate-800">
                   {/* Accent Top Border */}
                   <div className="absolute top-0 left-0 right-0 h-1.5 bg-slate-900"></div>
 
@@ -7362,13 +8610,13 @@ function App() {
                         </div>
                         <div className="mt-3 overflow-auto rounded-lg border border-emerald-100 bg-white">
                           <table className="min-w-full text-left text-xs">
-                            <thead className="bg-emerald-50 text-[10px] uppercase tracking-wide text-emerald-800">
+                            <thead className="bg-emerald-50 text-[11px] uppercase tracking-wide text-emerald-800">
                               <tr><th className="px-3 py-2">JOB / kỳ nguồn</th><th className="px-3 py-2">Ghi chú kế toán</th><th className="px-3 py-2 text-right">Số tiền cộng thêm</th></tr>
                             </thead>
                             <tbody className="divide-y divide-emerald-50 text-slate-700">
                               {scheduledCommissionPayouts.map((item: any, index: number) => (
                                 <tr key={`${item.job_no}-${item.source_period_label}-${index}`}>
-                                  <td className="px-3 py-2"><b className="text-slate-900">{item.job_no}</b><span className="block text-[10px] text-slate-500">{item.source_period_label || 'Kỳ nguồn'}{item.customer ? ` · ${item.customer}` : ''}</span></td>
+                                  <td className="px-3 py-2"><b className="text-slate-900">{item.job_no}</b><span className="block text-[11px] text-slate-500">{item.source_period_label || 'Kỳ nguồn'}{item.customer ? ` · ${item.customer}` : ''}</span></td>
                                   <td className="max-w-[360px] px-3 py-2 text-slate-600">{item.note || 'Kế toán đã lập lệnh chi trả bonus theo JOB.'}</td>
                                   <td className="whitespace-nowrap px-3 py-2 text-right font-bold text-emerald-700">{formatRoundedCurrency(item.amount || 0)}</td>
                                 </tr>
@@ -7389,7 +8637,7 @@ function App() {
                       {pendingCommissionJobs.length > 0 ? (
                         <div className="payslip-commission-job-list max-h-44 overflow-auto">
                           <table className="min-w-full text-left text-xs">
-                            <thead className="sticky top-0 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                            <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                               <tr><th className="px-4 py-2">Giai đoạn nguồn</th><th className="px-4 py-2">JOB</th><th className="px-4 py-2">Khách hàng</th><th className="px-4 py-2 text-right">Bonus đang chờ</th></tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -7423,7 +8671,7 @@ function App() {
                           <div className="py-2.5 flex justify-between">
                             <div>
                               <span className="font-semibold text-slate-800">Lương thực tế theo ngày công</span>
-                              <p className="text-[10px] text-slate-400 mt-0.5">Lương HĐ: {formatCurrency(myPayslipData.contract_salary)} | Công chuẩn: {calculatePeriodWorkingDays(myPayslipData.salary_period)}</p>
+                              <p className="text-[11px] text-slate-400 mt-0.5">Lương HĐ: {formatCurrency(myPayslipData.contract_salary)} | Công chuẩn: {calculatePeriodWorkingDays(myPayslipData.salary_period)}</p>
                               {myPayslipData.inputs?.is_mid_month_change && (() => {
                                 let actual_salary_old = 0;
                                 let actual_salary_new = 0;
@@ -7437,10 +8685,10 @@ function App() {
                                 }
                                 return (
                                   <div className="mt-1 space-y-0.5">
-                                    <p className="text-[10px] text-slate-500 italic">
+                                    <p className="text-[11px] text-slate-500 italic">
                                       - Mức cũ: {myPayslipData.inputs.prorated_days_old} ngày (Từ {getMonthBounds(myPayslipData.salary_period).start} đến {getDayBefore(myPayslipData.inputs.mid_month_effective_date)}: {formatCurrency(myPayslipData.inputs.prorated_old_salary)}) - {formatCurrency(actual_salary_old)}
                                     </p>
-                                    <p className="text-[10px] text-slate-500 italic">
+                                    <p className="text-[11px] text-slate-500 italic">
                                       - Mức mới: {myPayslipData.inputs.prorated_days_new} ngày (Từ {formatDateStr(myPayslipData.inputs.mid_month_effective_date)} đến {getMonthBounds(myPayslipData.salary_period).end}: {formatCurrency(myPayslipData.inputs.prorated_new_salary)}) - {formatCurrency(actual_salary_new)}
                                     </p>
                                   </div>
@@ -7454,7 +8702,7 @@ function App() {
                             <div className="py-2.5 flex justify-between">
                               <div>
                                 <span className="font-semibold text-slate-800">Phụ cấp ăn trưa</span>
-                                <p className="text-[10px] text-slate-400 mt-0.5">Miễn thuế: {formatCurrency(myPayslipData.inputs.meal_allowance_free)} | Tính thuế: {formatCurrency(myPayslipData.inputs.meal_allowance_tax)}</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Miễn thuế: {formatCurrency(myPayslipData.inputs.meal_allowance_free)} | Tính thuế: {formatCurrency(myPayslipData.inputs.meal_allowance_tax)}</p>
                               </div>
                               <span className="font-semibold text-slate-900">{formatCurrency(mealAllowance)}</span>
                             </div>
@@ -7464,7 +8712,7 @@ function App() {
                             <div className="py-2.5 flex justify-between">
                               <div>
                                 <span className="font-semibold text-slate-800">Phụ cấp điện thoại</span>
-                                <p className="text-[10px] text-slate-400 mt-0.5">Miễn thuế TNCN</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Miễn thuế TNCN</p>
                               </div>
                               <span className="font-semibold text-slate-900">{formatCurrency(phoneAllowance)}</span>
                             </div>
@@ -7493,7 +8741,7 @@ function App() {
                               <div>
                                 <span className="font-semibold text-slate-800">Thu nhập bổ sung khác</span>
                                 {myPayslipData.inputs.other_income_note && (
-                                  <p className="mt-1 max-w-xl text-[10px] leading-4 text-slate-500">
+                                  <p className="mt-1 max-w-xl text-[11px] leading-4 text-slate-500">
                                     Lý do: {myPayslipData.inputs.other_income_note}
                                   </p>
                                 )}
@@ -7549,7 +8797,7 @@ function App() {
                             <div className="py-2.5 flex justify-between">
                               <div>
                                 <span className="font-semibold text-slate-800">Bảo hiểm bắt buộc (10.5%)</span>
-                                <p className="text-[10px] text-slate-400 mt-0.5">BHXH (8%): {formatCurrency(myPayslipData.calculations.social_emp)} | BHYT: {formatCurrency(myPayslipData.calculations.health_emp)} | BHTN: {formatCurrency(myPayslipData.calculations.unemp_emp)}</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">BHXH (8%): {formatCurrency(myPayslipData.calculations.social_emp)} | BHYT: {formatCurrency(myPayslipData.calculations.health_emp)} | BHTN: {formatCurrency(myPayslipData.calculations.unemp_emp)}</p>
                               </div>
                               <span className="font-semibold text-rose-600">-{formatCurrency(totalIns)}</span>
                             </div>
@@ -7640,20 +8888,20 @@ function App() {
         )}
 
         {activeTab === 'my-held-bonuses' && (
-          <section className="mx-auto max-w-5xl space-y-6 animate-[fadeIn_0.3s_ease-out_forwards]">
-            <div className="flex flex-col gap-4 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <section className="mobile-held-bonus-page mx-auto max-w-5xl space-y-6 animate-[fadeIn_0.3s_ease-out_forwards]">
+            <div className="mobile-held-bonus-toolbar flex flex-col gap-4 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-xl font-bold tracking-tight text-slate-900">JOB bonus đang giữ</h2>
                 <p className="mt-1 text-xs text-slate-500">Theo dõi từng JOB có bonus chưa được chi trả và gửi yêu cầu để kế toán kiểm tra, xác minh thanh toán.</p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="mobile-held-bonus-toolbar__actions flex items-center gap-3">
                 <span className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 ring-1 ring-amber-100">{visibleMyHeldBonusJobs.length} JOB đang giữ</span>
                 <button type="button" onClick={loadMyHeldBonusJobs} disabled={loading} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">Làm mới</button>
               </div>
             </div>
 
             {heldBonusPeriods.length > 0 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex sm:items-center sm:justify-between">
+              <div className="mobile-held-bonus-period rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-bold text-slate-900">Quý có JOB bonus đang giữ</p>
                   <p className="mt-1 text-xs text-slate-500">Chọn đúng kỳ nguồn để xem các JOB đang chờ chi trả của bạn.</p>
@@ -7669,7 +8917,7 @@ function App() {
               </div>
             )}
 
-            <div className="rounded-2xl border border-sky-100 bg-sky-50/60 px-5 py-4 text-xs leading-5 text-sky-900">
+            <div className="mobile-held-bonus-notice rounded-2xl border border-sky-100 bg-sky-50/60 px-5 py-4 text-xs leading-5 text-sky-900">
               <b>Quy trình:</b> gửi yêu cầu → kế toán xác minh khách hàng đã thanh toán → kế toán lập lệnh chi trả theo JOB. Gửi yêu cầu không tự động mở bonus và không thay đổi công thức tính thưởng.
             </div>
 
@@ -7688,7 +8936,7 @@ function App() {
                     <article
                       key={job.job_id}
                       id={`held-bonus-job-${job.job_id}`}
-                      className={`scroll-mt-28 rounded-2xl border bg-white p-5 shadow-sm transition ${
+                      className={`mobile-held-bonus-card scroll-mt-28 rounded-2xl border bg-white p-5 shadow-sm transition ${
                         heldBonusNotificationJobId === Number(job.job_id)
                           ? 'border-amber-400 bg-amber-50/30 ring-4 ring-amber-200/70'
                           : 'border-slate-200'
@@ -7699,9 +8947,9 @@ function App() {
                           <div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-black text-slate-900">{job.job_no}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${statusInfoForJob.className}`}>{statusInfoForJob.label}</span></div>
                           <p className="mt-1 text-xs text-slate-500">{job.period_label} · {job.customer || 'Chưa có thông tin khách hàng'}</p>
                         </div>
-                        <div className="rounded-xl bg-amber-50 px-4 py-3 text-right ring-1 ring-amber-100"><p className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Bonus đang giữ</p><p className="mt-1 text-lg font-black text-amber-800">{formatCurrency(job.total_held || 0)}</p></div>
+                        <div className="mobile-held-bonus-total rounded-xl bg-amber-50 px-4 py-3 text-right ring-1 ring-amber-100"><p className="text-[11px] font-bold uppercase tracking-wide text-amber-700">Bonus đang giữ</p><p className="mt-1 text-lg font-black text-amber-800">{formatCurrency(job.total_held || 0)}</p></div>
                       </div>
-                      <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
+                      <div className="mobile-held-bonus-metrics mt-4 grid gap-3 text-xs sm:grid-cols-3">
                         <div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-400">Giữ tự động</p><b className="mt-1 block text-amber-700">{formatCurrency(job.payment_held || 0)}</b></div>
                         <div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-400">Giữ thủ công</p><b className="mt-1 block text-rose-700">{formatCurrency(job.manual_held || 0)}</b></div>
                         <div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-400">Payment Received</p><b className={`mt-1 block ${String(job.payment_received).toUpperCase() === 'YES' ? 'text-emerald-700' : 'text-amber-700'}`}>{job.payment_received || 'NO'}</b></div>
@@ -7709,7 +8957,7 @@ function App() {
                       {job.accounting_note && <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800"><b>Phản hồi kế toán:</b> {job.accounting_note}</p>}
                       {job.request_note && job.request_status !== 'NONE' && <p className="mt-3 text-xs text-slate-500"><b>Ghi chú yêu cầu:</b> {job.request_note}</p>}
                       {job.can_request ? (
-                        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                        <div className="mobile-held-bonus-request mt-4 flex flex-col gap-2 sm:flex-row">
                           <input value={myHeldBonusNotes[job.job_id] || ''} onChange={(event) => setMyHeldBonusNotes((previous) => ({ ...previous, [job.job_id]: event.target.value }))} placeholder="Ghi chú cho kế toán (không bắt buộc)" className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-sky-300" />
                           <button type="button" onClick={() => void requestAccountingForMyHeldBonus(job)} disabled={loading} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">Yêu cầu kế toán duyệt</button>
                         </div>
@@ -7719,7 +8967,7 @@ function App() {
                 })}
               </div>
             ) : (
-              <div className="rounded-[28px] border border-emerald-100 bg-emerald-50/40 p-12 text-center shadow-sm"><p className="text-base font-bold text-emerald-800">{myHeldBonusJobs.length > 0 ? 'Quý đã chọn không có JOB đang giữ bonus' : 'Không có JOB nào đang giữ bonus'}</p><p className="mt-2 text-xs text-emerald-700">Khi có bonus chưa đủ điều kiện chi trả, JOB sẽ tự xuất hiện tại đây.</p></div>
+              <div className="mobile-held-bonus-empty rounded-[28px] border border-emerald-100 bg-emerald-50/40 p-12 text-center shadow-sm"><p className="text-base font-bold text-emerald-800">{myHeldBonusJobs.length > 0 ? 'Quý đã chọn không có JOB đang giữ bonus' : 'Không có JOB nào đang giữ bonus'}</p><p className="mt-2 text-xs text-emerald-700">Khi có bonus chưa đủ điều kiện chi trả, JOB sẽ tự xuất hiện tại đây.</p></div>
             )}
           </section>
         )}
@@ -7749,16 +8997,14 @@ function App() {
                 <h2 className="text-xl font-bold text-slate-900 tracking-tight">Nhật ký & Lịch công chi tiết</h2>
                 <p className="text-xs text-slate-500 mt-1">Chu kỳ tính công mặc định từ ngày 23 tháng trước đến ngày 22 tháng này.</p>
               </div>
-              <div className="flex items-center gap-3">
-                <select
+              <div className="flex flex-wrap items-end gap-3">
+                <MonthYearSelect
+                  id="my-attendance-detail-period"
                   value={myAttendancePeriod}
-                  onChange={(e) => setMyAttendancePeriod(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-4 py-2.5 text-sm font-semibold outline-none focus:border-slate-300"
-                >
-                  {MONTH_OPTIONS_2026.map((period) => (
-                    <option key={period} value={period}>{formatAttendanceMonthOption(period)}</option>
-                  ))}
-                </select>
+                  onChange={setMyAttendancePeriod}
+                  yearLabel="Năm công"
+                  monthLabel="Tháng công"
+                />
                 <button
                   type="button"
                   onClick={loadMyAttendance}
@@ -7854,7 +9100,7 @@ function App() {
                         </div>
 
                         {/* Bot: info & popover trigger */}
-                        <div className="flex justify-between items-center text-[10px]">
+                        <div className="flex justify-between items-center text-[11px]">
                           <div>
                             {day.late_minutes > 0 && (
                               <span className="text-amber-600 font-semibold block">Trễ {day.late_minutes}m</span>
@@ -7868,21 +9114,21 @@ function App() {
                             <div className="relative group">
                               <button
                                 type="button"
-                                className="cursor-pointer text-slate-400 hover:text-slate-750 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded text-[10px] font-semibold transition"
+                                className="cursor-pointer text-slate-400 hover:text-slate-750 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded text-[11px] font-semibold transition"
                               >
                                 •••
                               </button>
                               
                               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-30 w-48 bg-slate-950/95 backdrop-blur-md text-white text-[11px] rounded-xl p-3 shadow-xl pointer-events-none transition-all duration-300 border border-white/10">
-                                <p className="font-bold border-b border-white/10 pb-1 mb-1.5 uppercase tracking-wider text-[9px] text-slate-400">Lịch sử quẹt thẻ trong ngày</p>
+                                <p className="font-bold border-b border-white/10 pb-1 mb-1.5 uppercase tracking-wider text-[11px] text-slate-400">Lịch sử quẹt thẻ trong ngày</p>
                                 <div className="grid grid-cols-3 gap-1">
                                   {day.raw_scans.map((scan: string, idx: number) => (
-                                    <span key={idx} className="bg-white/10 px-1 py-0.5 rounded text-center font-mono text-[10px]">{scan.slice(0, 5)}</span>
+                                    <span key={idx} className="bg-white/10 px-1 py-0.5 rounded text-center font-mono text-[11px]">{scan.slice(0, 5)}</span>
                                   ))}
                                 </div>
                                 {day.is_overridden && (
-                                  <p className="mt-2 text-[9px] text-amber-300 leading-normal border-t border-white/10 pt-1">
-                                    ✍️ Đã sửa bởi Admin: {day.override_reason}
+                                  <p className="mt-2 text-[11px] text-amber-300 leading-normal border-t border-white/10 pt-1">
+                                    <AppIcon name="edit" size={13} /> Đã sửa bởi Admin: {day.override_reason}
                                   </p>
                                 )}
                               </div>
@@ -7897,19 +9143,19 @@ function App() {
                 {/* Legend */}
                 <div className="mt-6 pt-6 border-t border-slate-150 flex flex-wrap gap-4 text-xs text-slate-500">
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center justify-center h-5 w-8 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">X</span>
+                    <span className="inline-flex items-center justify-center h-5 w-8 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">X</span>
                     <span>Công thường (Đầy đủ)</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center justify-center h-5 w-8 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">P</span>
+                    <span className="inline-flex items-center justify-center h-5 w-8 rounded text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">P</span>
                     <span>Nghỉ phép hưởng lương</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center justify-center h-5 w-8 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Ro</span>
+                    <span className="inline-flex items-center justify-center h-5 w-8 rounded text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Ro</span>
                     <span>Vắng mặt (Không công)</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center justify-center h-5 w-8 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">CT</span>
+                    <span className="inline-flex items-center justify-center h-5 w-8 rounded text-[11px] font-bold bg-purple-50 text-purple-700 border border-purple-200">CT</span>
                     <span>Công tác bên ngoài</span>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -7959,18 +9205,18 @@ function App() {
                   className="other-income-evidence-modal__close app-close-button"
                   aria-label="Đóng"
                 >
-                  ×
+                  <AppIcon name="close" size={17} />
                 </button>
               </header>
 
               <div className="other-income-evidence-modal__body space-y-5 px-6 py-5">
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                  <div className="other-income-evidence-summary other-income-evidence-summary--amount rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Số tiền TN KHÁC</p>
                     <p className="mt-2 text-2xl font-bold text-emerald-800">{formatCurrency(otherIncomeEvidenceAmount)}</p>
                     <p className="mt-1 text-xs text-emerald-700">Nhập hoặc sửa số này tại cột TN KHÁC trong bảng lương.</p>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="other-income-evidence-summary rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Chứng từ hiện tại</p>
                     <p className="mt-2 truncate text-sm font-semibold text-slate-800">
                       {otherIncomeEvidenceInput?.other_income_document_name || 'Chưa có tệp đính kèm'}
@@ -7990,7 +9236,7 @@ function App() {
                   <textarea
                     value={otherIncomeEvidenceNote}
                     onChange={(event) => setOtherIncomeEvidenceNote(event.target.value)}
-                    disabled={isSalaryLocked || isSalaryConfirmed}
+                    disabled={isSalaryLocked}
                     maxLength={2000}
                     rows={4}
                     placeholder="Ví dụ: Hỗ trợ dự án ABC theo quyết định ngày 02/08/2026..."
@@ -7999,7 +9245,7 @@ function App() {
                   <span className="mt-1 block text-right text-xs text-slate-400">{otherIncomeEvidenceNote.length}/2.000</span>
                 </label>
 
-                <label className="block rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 transition hover:border-slate-400">
+                <label className="other-income-evidence-upload block rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 transition hover:border-slate-400">
                   <span className="block text-sm font-semibold text-slate-800">Tải chứng từ liên quan</span>
                   <span className="mt-1 block text-xs leading-5 text-slate-500">
                     PDF, Excel, Word, CSV hoặc ảnh; tối đa 15 MB. Tệp được lưu riêng và chỉ tài khoản quản trị lương được truy cập.
@@ -8007,9 +9253,9 @@ function App() {
                   <input
                     type="file"
                     accept=".pdf,.xlsx,.xls,.csv,.doc,.docx,.png,.jpg,.jpeg"
-                    disabled={isSalaryLocked || isSalaryConfirmed}
+                    disabled={isSalaryLocked}
                     onChange={(event) => setOtherIncomeEvidenceFile(event.target.files?.[0] || null)}
-                    className="mt-3 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-200 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-800 hover:file:bg-slate-300"
+                    className="other-income-evidence-file-input mt-3 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-200 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-800 hover:file:bg-slate-300"
                   />
                   {otherIncomeEvidenceFile && (
                     <span className="mt-2 block truncate text-xs font-medium text-slate-700">Tệp mới: {otherIncomeEvidenceFile.name}</span>
@@ -8021,25 +9267,31 @@ function App() {
                 <div className="flex flex-wrap gap-2">
                   {otherIncomeEvidenceInput?.other_income_document_name && (
                     <>
-                      <button type="button" onClick={downloadOtherIncomeEvidence} className="h-10 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 transition hover:bg-slate-100">
+                      <button type="button" onClick={downloadOtherIncomeEvidence} className="app-download-button app-modal-button app-modal-button--secondary h-10 rounded-xl px-4 text-sm font-semibold transition">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" />
+                        </svg>
                         Tải chứng từ
                       </button>
-                      <button type="button" onClick={deleteOtherIncomeEvidence} disabled={isSalaryLocked || isSalaryConfirmed} className="h-10 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50">
+                      <button type="button" onClick={deleteOtherIncomeEvidence} disabled={isSalaryLocked || isSalaryConfirmed} className="app-delete-button h-10 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50">
                         Xóa tệp
                       </button>
                     </>
                   )}
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" onClick={closeOtherIncomeEvidence} className="h-10 rounded-xl border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100">
+                  <button type="button" onClick={closeOtherIncomeEvidence} className="app-modal-button app-modal-button--secondary h-10 rounded-xl border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100">
                     Hủy
                   </button>
                   <button
                     type="button"
                     onClick={saveOtherIncomeEvidence}
-                    disabled={isSavingOtherIncomeEvidence || isSalaryLocked || isSalaryConfirmed}
-                    className="h-10 rounded-xl bg-slate-800 px-5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={isSavingOtherIncomeEvidence || isSalaryLocked}
+                    className="app-modal-button app-modal-button--primary h-10 rounded-xl bg-slate-800 px-5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 4h12l2 2v14H5V4Zm3 0v6h8V4M8 20v-6h8v6" />
+                    </svg>
                     {isSavingOtherIncomeEvidence ? 'Đang lưu...' : 'Lưu hồ sơ'}
                   </button>
                 </div>
@@ -8047,6 +9299,14 @@ function App() {
             </section>
           </div>,
           document.body,
+        )}
+
+        {(isBusinessAdminRole(currentUser?.role) || currentUser?.role === 'HR_ADMIN') && activeTab === 'onboarding' && (
+          <OnboardingAdmin apiRequest={apiRequest} onNotice={setMessage} />
+        )}
+
+        {(isBusinessAdminRole(currentUser?.role) || currentUser?.role === 'HR_ADMIN') && activeTab === 'offboarding' && (
+          <OffboardingAdmin apiRequest={apiRequest} onNotice={setMessage} />
         )}
 
         {salaryPolicyModalOpen && createPortal(
@@ -8077,7 +9337,7 @@ function App() {
                   aria-label="Đóng cấu hình chính sách lương"
                   className="app-close-button"
                 >
-                  ×
+                  <AppIcon name="close" size={17} />
                 </button>
               </header>
 
@@ -8087,10 +9347,15 @@ function App() {
                     <span className="mb-1.5 block text-sm font-semibold text-slate-700">Tên phiên bản</span>
                     <input value={salaryPolicyForm.name} onChange={(event) => setSalaryPolicyForm((current) => ({ ...current, name: event.target.value }))} maxLength={180} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#163b66] focus:ring-4 focus:ring-blue-50" />
                   </label>
-                  <label className="block md:col-span-3">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">Hiệu lực từ tháng</span>
-                    <input type="month" value={salaryPolicyForm.effective_from.slice(0, 7)} onChange={(event) => setSalaryPolicyForm((current) => ({ ...current, effective_from: `${event.target.value}-01` }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#163b66] focus:ring-4 focus:ring-blue-50" />
-                  </label>
+                  <div className="block md:col-span-3">
+                    <MonthYearSelect
+                      id="salary-policy-effective-period"
+                      value={salaryPolicyForm.effective_from.slice(0, 7)}
+                      onChange={(period) => setSalaryPolicyForm((current) => ({ ...current, effective_from: `${period}-01` }))}
+                      yearLabel="Năm hiệu lực"
+                      monthLabel="Tháng hiệu lực"
+                    />
+                  </div>
                   <label className="block md:col-span-2">
                     <span className="mb-1.5 block text-sm font-semibold text-slate-700">Vùng BHTN mặc định</span>
                     <select value={salaryPolicyForm.default_region} onChange={(event) => setSalaryPolicyForm((current) => ({ ...current, default_region: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#163b66] focus:ring-4 focus:ring-blue-50">

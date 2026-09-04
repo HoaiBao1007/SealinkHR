@@ -1,7 +1,7 @@
 # ===================================================================
 #  SEALINK Attendance - XAMPP MySQL Startup Script
 #  Runs backend with MySQL/MariaDB provided by XAMPP.
-#  Requirement: XAMPP installed (default: C:\xampp)
+#  Requirement: XAMPP installed (preferred: D:\xampp)
 # ===================================================================
 
 $ErrorActionPreference = "Stop"
@@ -38,8 +38,8 @@ Write-Host "+----------------------------------------------+" -ForegroundColor M
 Write-Step "Detecting XAMPP installation..."
 
 $xamppPaths = @(
-    "C:\xampp",
     "D:\xampp",
+    "C:\xampp",
     "C:\Program Files\xampp",
     "$env:SystemDrive\xampp"
 )

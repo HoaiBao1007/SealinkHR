@@ -39,11 +39,11 @@ def test_notification_visibility_is_role_aware(client: TestClient, db_session: S
     db_session.commit()
 
     chief_payload = _as(client, chief).json()
-    assert chief_payload["unread_count"] == 3
-    assert {item["category"] for item in chief_payload["items"]} == {"HR", "PAYROLL", "BONUS"}
+    assert chief_payload["unread_count"] == 1
+    assert {item["category"] for item in chief_payload["items"]} == {"HR"}
 
     it_payload = _as(client, it_admin).json()
-    assert it_payload["unread_count"] == 3
+    assert it_payload["unread_count"] == 1
 
     hr_payload = _as(client, hr_admin).json()
     assert hr_payload["unread_count"] == 1
@@ -53,6 +53,45 @@ def test_notification_visibility_is_role_aware(client: TestClient, db_session: S
     assert employee_payload["unread_count"] == 1
     assert [item["category"] for item in employee_payload["items"]] == ["PAYROLL"]
     assert employee_payload["items"][0]["target_name"] == "employee"
+
+
+def test_targeted_admin_notifications_are_private_and_include_sender(client: TestClient, db_session: Session):
+    chief = _user(db_session, "chief", "ADMIN")
+    it_admin = _user(db_session, "it", "IT_ADMIN")
+    director = _user(db_session, "director", "DIRECTOR")
+    db_session.add_all(
+        [
+            Notification(
+                category="PAYROLL",
+                event_type="SALARY_APPROVAL_REQUESTED",
+                title="Yêu cầu phê duyệt bảng lương",
+                message="Kế toán trưởng đang chờ phê duyệt",
+                target_user_id=it_admin.id,
+                actor_user_id=chief.id,
+            ),
+            Notification(
+                category="PAYROLL",
+                event_type="SALARY_APPROVAL_REQUESTED",
+                title="Yêu cầu phê duyệt bảng lương",
+                message="Kế toán trưởng đang chờ phê duyệt",
+                target_user_id=director.id,
+                actor_user_id=chief.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    it_payload = _as(client, it_admin).json()
+    assert it_payload["unread_count"] == 1
+    assert it_payload["items"][0]["target_name"] == "it"
+    assert it_payload["items"][0]["sender_name"] == "chief"
+
+    director_payload = _as(client, director).json()
+    assert director_payload["unread_count"] == 1
+    assert director_payload["items"][0]["target_name"] == "director"
+    assert director_payload["items"][0]["sender_name"] == "chief"
+
+    assert _as(client, chief).json()["unread_count"] == 0
 
 
 def test_read_state_is_private_to_each_account(client: TestClient, db_session: Session):

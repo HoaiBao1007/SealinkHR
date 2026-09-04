@@ -5,7 +5,7 @@ from sqlalchemy import and_, exists, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.core.roles import ADMIN, HR_ADMIN, IT_ADMIN
+from app.core.roles import BUSINESS_ADMIN_ROLES, HR_ADMIN
 from app.models.employee import Employee
 from app.models.notification import Notification, NotificationRead
 from app.models.user import User
@@ -118,15 +118,27 @@ def _action_context(db: Session, item: Notification) -> dict:
 
 def _visible_query(db: Session, user: User):
     query = db.query(Notification)
-    if user.role in {ADMIN, IT_ADMIN}:
-        # Time Off notifications are private and remain visible only to their
-        # recipient, even though these roles can inspect other operational feeds.
+    if user.role in BUSINESS_ADMIN_ROLES:
+        # Explicitly targeted notifications are private to their recipient.
+        # Untargeted operational notifications remain visible to business admins.
         return query.filter(
-            or_(Notification.category != "TIME_OFF", Notification.target_user_id == user.id)
+            or_(
+                Notification.target_user_id == user.id,
+                and_(
+                    Notification.target_user_id.is_(None),
+                    Notification.category != "TIME_OFF",
+                ),
+            )
         )
     if user.role == HR_ADMIN:
         return query.filter(
-            or_(Notification.category == "HR", Notification.target_user_id == user.id)
+            or_(
+                Notification.target_user_id == user.id,
+                and_(
+                    Notification.target_user_id.is_(None),
+                    Notification.category == "HR",
+                ),
+            )
         )
     return query.filter(Notification.target_user_id == user.id)
 
@@ -152,19 +164,21 @@ def list_notifications(
     items = visible.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit).all()
     item_ids = [item.id for item in items]
     target_user_ids = {item.target_user_id for item in items if item.target_user_id is not None}
-    target_labels: dict[int, str] = {}
-    if target_user_ids:
-        target_labels.update(
+    actor_user_ids = {item.actor_user_id for item in items if item.actor_user_id is not None}
+    related_user_ids = target_user_ids | actor_user_ids
+    account_labels: dict[int, str] = {}
+    if related_user_ids:
+        account_labels.update(
             {
                 user.id: user.username
-                for user in db.query(User).filter(User.id.in_(target_user_ids)).all()
+                for user in db.query(User).filter(User.id.in_(related_user_ids)).all()
             }
         )
-        target_labels.update(
+        account_labels.update(
             {
                 employee.user_id: employee.full_name
                 for employee in db.query(Employee)
-                .filter(Employee.user_id.in_(target_user_ids))
+                .filter(Employee.user_id.in_(related_user_ids))
                 .all()
                 if employee.user_id is not None
             }
@@ -193,7 +207,8 @@ def list_notifications(
                 "resource_id": item.resource_id,
                 "action_url": item.action_url,
                 "action_context": _action_context(db, item),
-                "target_name": target_labels.get(item.target_user_id) if item.target_user_id else None,
+                "target_name": account_labels.get(item.target_user_id) if item.target_user_id else None,
+                "sender_name": account_labels.get(item.actor_user_id) if item.actor_user_id else None,
                 "created_at": item.created_at,
                 "is_read": item.id in read_ids,
             }

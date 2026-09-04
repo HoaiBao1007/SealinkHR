@@ -18,10 +18,16 @@ class Timesheet(Base):
     period_end: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), nullable=False, index=True)
     total_work_days: Mapped[float] = mapped_column(Numeric(5,2), default=0)
+    # Accountant-approved payable days (Excel column "Ngày công").
+    # ``total_work_days`` remains the actual-attendance value ("Ngày công TT").
+    total_payroll_days: Mapped[float | None] = mapped_column(Numeric(5,2), nullable=True)
     total_late_minutes: Mapped[int] = mapped_column(Integer, default=0)
     total_absent_days: Mapped[float] = mapped_column(Numeric(5,2), default=0)
     total_paid_leave_days: Mapped[float] = mapped_column(Numeric(5,2), default=0)
     total_unpaid_leave_days: Mapped[float] = mapped_column(Numeric(5,2), default=0)
+    previous_paid_leave_balance: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    current_month_paid_leave_credit: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    remaining_paid_leave_days: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     total_business_trip_days: Mapped[float] = mapped_column(Numeric(5,2), default=0)
     approval_status: Mapped[str] = mapped_column(String(20), default="draft")
     approved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"), nullable=True)

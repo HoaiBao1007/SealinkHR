@@ -19,6 +19,10 @@ from app.services.access_role_service import (
     infer_employee_access_role,
     sync_employee_access_role,
 )
+from app.services.employee_directory import (
+    is_shared_it_admin_profile,
+    machine_identifier_conflict_detail,
+)
 from app.models.salary_decision import SalaryDecision
 from app.models.monthly_salary_input import MonthlySalaryInput
 from app.models.attendance_daily import AttendanceDaily
@@ -42,6 +46,11 @@ from app.core.employee_type import (
     allowance_defaults_for_type,
     apply_contract_allowance_defaults,
     normalize_employee_type,
+)
+from app.core.employee_contract import (
+    FIXED_TERM_CONTRACT_TYPES,
+    normalize_contract_type,
+    validate_contract_period,
 )
 from app.services.salary_decision_service import apply_type_decision_to_salary_inputs
 from app.services.notification_service import HR, actor_id, add_notification
@@ -71,7 +80,7 @@ def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
-def _attendance_identifier_owner(
+def _machine_identifier_owner(
     db: Session,
     identifier: str,
     *,
@@ -79,12 +88,7 @@ def _attendance_identifier_owner(
 ) -> Employee | None:
     """Find an employee using an ID as either primary or alternate machine ID."""
 
-    query = db.query(Employee).filter(
-        or_(
-            Employee.machine_employee_id == identifier,
-            Employee.biometric_id == identifier,
-        )
-    )
+    query = db.query(Employee).filter(Employee.machine_employee_id == identifier)
     if exclude_employee_id is not None:
         query = query.filter(Employee.id != exclude_employee_id)
     return query.first()
@@ -92,7 +96,6 @@ def _attendance_identifier_owner(
 
 class EmployeeCreateRequest(BaseModel):
     machine_employee_id: str = Field(min_length=1, max_length=50)
-    biometric_id: Optional[str] = Field(default=None, max_length=50)
     full_name: str = Field(min_length=1, max_length=150)
     notion_name: Optional[str] = Field(default=None, max_length=150)
     department_code: Optional[str] = None
@@ -115,7 +118,13 @@ class EmployeeCreateRequest(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = Field(default=None, max_length=128)
     start_date: Optional[str] = None
+    contract_type: Optional[str] = None
+    contract_sign_date: Optional[date] = None
+    contract_start_date: Optional[date] = None
+    contract_end_date: Optional[date] = None
     resignation_period: Optional[str] = None
+    last_working_date: Optional[date] = None
+    last_pay_date: Optional[date] = None
     tax_code: Optional[str] = None
     phone_number: Optional[str] = None
     company_phone_number: Optional[str] = None
@@ -131,7 +140,6 @@ class EmployeeCreateRequest(BaseModel):
 
 class EmployeeUpdateRequest(BaseModel):
     machine_employee_id: Optional[str] = None
-    biometric_id: Optional[str] = None
     full_name: Optional[str] = None
     notion_name: Optional[str] = None
     department_code: Optional[str] = None
@@ -158,7 +166,13 @@ class EmployeeUpdateRequest(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = Field(default=None, max_length=128)
     start_date: Optional[str] = None
+    contract_type: Optional[str] = None
+    contract_sign_date: Optional[date] = None
+    contract_start_date: Optional[date] = None
+    contract_end_date: Optional[date] = None
     resignation_period: Optional[str] = None
+    last_working_date: Optional[date] = None
+    last_pay_date: Optional[date] = None
     tax_code: Optional[str] = None
     phone_number: Optional[str] = None
     company_phone_number: Optional[str] = None
@@ -175,7 +189,6 @@ class EmployeeUpdateRequest(BaseModel):
 class EmployeeResponse(BaseModel):
     id: int
     machine_employee_id: str
-    biometric_id: Optional[str] = None
     full_name: str
     notion_name: Optional[str]
     department_code: Optional[str]
@@ -214,7 +227,13 @@ class EmployeeResponse(BaseModel):
     access_role: str = "USER"
     access_role_reason: str = ""
     start_date: Optional[str] = None
+    contract_type: Optional[str] = None
+    contract_sign_date: Optional[str] = None
+    contract_start_date: Optional[str] = None
+    contract_end_date: Optional[str] = None
     resignation_period: Optional[str] = None
+    last_working_date: Optional[str] = None
+    last_pay_date: Optional[str] = None
     bonus_coefficient: float
 
 
@@ -224,7 +243,6 @@ def _to_response(emp: Employee, db: Session) -> EmployeeResponse:
     return EmployeeResponse(
         id=emp.id,
         machine_employee_id=emp.machine_employee_id,
-        biometric_id=emp.biometric_id,
         full_name=emp.full_name,
         notion_name=emp.notion_name,
         department_code=emp.department_code,
@@ -263,7 +281,13 @@ def _to_response(emp: Employee, db: Session) -> EmployeeResponse:
         access_role=access_role,
         access_role_reason=access_role_reason,
         start_date=emp.start_date.isoformat() if emp.start_date else None,
+        contract_type=emp.contract_type,
+        contract_sign_date=emp.contract_sign_date.isoformat() if emp.contract_sign_date else None,
+        contract_start_date=emp.contract_start_date.isoformat() if emp.contract_start_date else None,
+        contract_end_date=emp.contract_end_date.isoformat() if emp.contract_end_date else None,
         resignation_period=emp.resignation_period,
+        last_working_date=emp.last_working_date.isoformat() if emp.last_working_date else None,
+        last_pay_date=emp.last_pay_date.isoformat() if emp.last_pay_date else None,
         bonus_coefficient=float(emp.bonus_coefficient) if emp.bonus_coefficient is not None else 0.0
     )
 
@@ -289,7 +313,7 @@ def list_employees(
     if is_active is not None:
         query = query.filter(Employee.is_active == is_active)
     employees = query.order_by(Employee.id.asc()).all()
-    return [_to_response(emp, db) for emp in employees]
+    return [_to_response(emp, db) for emp in employees if not is_shared_it_admin_profile(emp)]
 
 
 @router.get("/api/employees/{employee_id}", response_model=EmployeeResponse)
@@ -307,21 +331,12 @@ def create_employee(
     current_user: User = Depends(get_admin_user),
 ) -> EmployeeResponse:
     machine_employee_id = payload.machine_employee_id.strip()
-    exists = _attendance_identifier_owner(db, machine_employee_id)
+    exists = _machine_identifier_owner(db, machine_employee_id)
     if exists:
         raise HTTPException(
             status_code=409,
-            detail="Mã máy chấm công (ID) đã được dùng làm mã chính hoặc mã phụ của nhân viên khác.",
+            detail=machine_identifier_conflict_detail(machine_employee_id, exists),
         )
-
-    biometric_id_val = _normalize_optional_text(payload.biometric_id)
-    if biometric_id_val is not None:
-        bio_exists = _attendance_identifier_owner(db, biometric_id_val)
-        if bio_exists:
-            raise HTTPException(
-                status_code=409,
-                detail="Mã vân tay (Biometric ID) đã được dùng làm mã chính hoặc mã phụ của nhân viên khác.",
-            )
 
     notion_name = _normalize_optional_text(payload.notion_name)
     if notion_name is not None:
@@ -331,6 +346,19 @@ def create_employee(
 
     try:
         employee_type = normalize_employee_type(payload.employee_type)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    try:
+        contract_type = normalize_contract_type(payload.contract_type)
+        contract_start_date = payload.contract_start_date if contract_type in FIXED_TERM_CONTRACT_TYPES else None
+        contract_end_date = payload.contract_end_date if contract_type in FIXED_TERM_CONTRACT_TYPES else None
+        validate_contract_period(
+            contract_type,
+            payload.contract_sign_date,
+            contract_start_date,
+            contract_end_date,
+        )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -398,7 +426,6 @@ def create_employee(
 
         employee = Employee(
             machine_employee_id=payload.machine_employee_id.strip(),
-            biometric_id=biometric_id_val,
             full_name=payload.full_name.strip(),
             notion_name=notion_name,
             department_code=_normalize_optional_text(payload.department_code),
@@ -434,7 +461,13 @@ def create_employee(
             contract_url=_normalize_optional_text(payload.contract_url),
             user_id=user.id if user else None,
             start_date=parsed_start_date,
+            contract_type=contract_type,
+            contract_sign_date=payload.contract_sign_date,
+            contract_start_date=contract_start_date,
+            contract_end_date=contract_end_date,
             resignation_period=_normalize_optional_text(payload.resignation_period),
+            last_working_date=payload.last_working_date,
+            last_pay_date=payload.last_pay_date,
         )
         db.add(employee)
         db.flush()
@@ -477,12 +510,13 @@ def update_employee(
         "trans_allowance": employee.trans_allowance,
         "other_allowance": employee.other_allowance,
     }
+    type_changed = False
 
     if payload.machine_employee_id is not None:
         new_machine_id = payload.machine_employee_id.strip()
         if not new_machine_id:
             raise HTTPException(status_code=400, detail="machine_employee_id cannot be empty")
-        exists = _attendance_identifier_owner(
+        exists = _machine_identifier_owner(
             db,
             new_machine_id,
             exclude_employee_id=employee_id,
@@ -490,24 +524,9 @@ def update_employee(
         if exists:
             raise HTTPException(
                 status_code=409,
-                detail="Mã máy chấm công (ID) đã được dùng làm mã chính hoặc mã phụ của nhân viên khác.",
+                detail=machine_identifier_conflict_detail(new_machine_id, exists),
             )
         employee.machine_employee_id = new_machine_id
-
-    if payload.biometric_id is not None:
-        new_biometric_id = _normalize_optional_text(payload.biometric_id)
-        if new_biometric_id is not None:
-            exists = _attendance_identifier_owner(
-                db,
-                new_biometric_id,
-                exclude_employee_id=employee_id,
-            )
-            if exists:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Mã vân tay (Biometric ID) đã được dùng làm mã chính hoặc mã phụ của nhân viên khác.",
-                )
-        employee.biometric_id = new_biometric_id
 
     if payload.full_name is not None:
         employee.full_name = payload.full_name.strip()
@@ -538,16 +557,26 @@ def update_employee(
         employee.is_active = True if payload.status == "ACTIVE" else False
         if payload.status != "RESIGNED":
             employee.resignation_period = None
+            employee.last_working_date = None
+            employee.last_pay_date = None
     elif payload.is_active is not None:
         employee.is_active = payload.is_active
         if payload.is_active:
             employee.status = "ACTIVE"
             employee.resignation_period = None
+            employee.last_working_date = None
+            employee.last_pay_date = None
         elif employee.status == "ACTIVE":
             employee.status = "LOCKED"
 
     if payload.resignation_period is not None:
         employee.resignation_period = _normalize_optional_text(payload.resignation_period)
+    if "last_working_date" in payload.model_fields_set:
+        employee.last_working_date = payload.last_working_date
+        if payload.last_working_date:
+            employee.resignation_period = payload.last_working_date.strftime("%Y-%m")
+    if "last_pay_date" in payload.model_fields_set:
+        employee.last_pay_date = payload.last_pay_date
     if payload.start_date is not None:
         val = _normalize_optional_text(payload.start_date)
         if val:
@@ -557,6 +586,38 @@ def update_employee(
                 pass
         else:
             employee.start_date = None
+
+    contract_fields = payload.model_fields_set & {
+        "contract_type",
+        "contract_sign_date",
+        "contract_start_date",
+        "contract_end_date",
+    }
+    if "contract_type" in contract_fields:
+        try:
+            employee.contract_type = normalize_contract_type(payload.contract_type)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+    if "contract_sign_date" in contract_fields:
+        employee.contract_sign_date = payload.contract_sign_date
+    if employee.contract_type in FIXED_TERM_CONTRACT_TYPES:
+        if "contract_start_date" in contract_fields:
+            employee.contract_start_date = payload.contract_start_date
+        if "contract_end_date" in contract_fields:
+            employee.contract_end_date = payload.contract_end_date
+    else:
+        employee.contract_start_date = None
+        employee.contract_end_date = None
+    if contract_fields:
+        try:
+            validate_contract_period(
+                employee.contract_type,
+                employee.contract_sign_date,
+                employee.contract_start_date,
+                employee.contract_end_date,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     if payload.employee_code is not None:
         employee.employee_code = _normalize_optional_text(payload.employee_code)
@@ -622,6 +683,30 @@ def update_employee(
                 employee.other_allowance = previous_allowances["other_allowance"]
         else:
             employee.employee_type = employee_type
+
+    # The employee detail dialog edits the contract allowance source of truth.
+    # Keep every payroll row in sync so the salary grid and already-issued
+    # payslip reflect the saved values immediately. Publication controls
+    # visibility/approval only; it is not a write lock.
+    allowance_fields_changed = payload.model_fields_set & {
+        "meal_allowance",
+        "phone_allowance",
+        "trans_allowance",
+        "other_allowance",
+    }
+    if allowance_fields_changed and not type_changed:
+        draft_salary_inputs = db.query(MonthlySalaryInput).filter(
+            MonthlySalaryInput.employee_id == employee.id,
+        ).all()
+        for monthly_input in draft_salary_inputs:
+            if "meal_allowance" in allowance_fields_changed:
+                monthly_input.meal_allowance_free = employee.meal_allowance
+            if "phone_allowance" in allowance_fields_changed:
+                monthly_input.phone_allowance_free = employee.phone_allowance
+            if "trans_allowance" in allowance_fields_changed:
+                monthly_input.trans_allowance_tax = employee.trans_allowance
+            if "other_allowance" in allowance_fields_changed:
+                monthly_input.perf_allowance_tax = employee.other_allowance
     if payload.dependents_count is not None:
         employee.dependents_count = payload.dependents_count
     if payload.account_number is not None:

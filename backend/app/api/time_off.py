@@ -14,7 +14,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.core.roles import ADMIN, HR_ADMIN, IT_ADMIN
+from app.core.roles import ADMIN, DIRECTOR, HR_ADMIN, IT_ADMIN
 from app.models.department import Department
 from app.models.employee import Employee
 from app.models.off_request import ApprovalAction, OffRequest, OffRequestAttachment
@@ -194,7 +194,7 @@ def _resolve_approver(db: Session, requester: Employee) -> ResolvedApprover | No
             return ResolvedApprover(user=approver.user, employee=approver.employee, source=source)
         current = current.parent
 
-    fallback_roles = [HR_ADMIN, ADMIN, IT_ADMIN]
+    fallback_roles = [HR_ADMIN, ADMIN, DIRECTOR, IT_ADMIN]
     fallback_users = (
         db.query(User)
         .filter(User.role.in_(fallback_roles), User.id != requester.user_id)
@@ -259,7 +259,7 @@ def _selectable_approvers(db: Session, requester: Employee) -> list[ResolvedAppr
         )
 
     # System approvers remain available as a controlled fallback choice.
-    fallback_roles = [HR_ADMIN, ADMIN, IT_ADMIN]
+    fallback_roles = [HR_ADMIN, ADMIN, DIRECTOR, IT_ADMIN]
     fallback_users = (
         db.query(User)
         .filter(User.role.in_(fallback_roles), User.id != requester.user_id)
@@ -709,7 +709,7 @@ def _serialize_request(
         "is_own": own,
         "is_assigned_approver": assigned,
         "can_act": assigned and canonical_status == PENDING_MANAGER and not own,
-        "can_edit": own and canonical_status == MORE_INFO_REQUIRED,
+        "can_edit": own and canonical_status in {PENDING_MANAGER, MORE_INFO_REQUIRED},
         "can_edit_schedule": it_schedule_editor,
     }
     if include_actions:
@@ -724,9 +724,23 @@ def _format_request_period(request: OffRequest) -> str:
     return f"{start} đến {end}"
 
 
-def _notify_approver(db: Session, request: OffRequest, employee: Employee, department: Department, approver: ResolvedApprover, *, resubmitted: bool = False) -> None:
-    event_type = "TIME_OFF_RESUBMITTED" if resubmitted else "TIME_OFF_SUBMITTED"
-    verb = "đã bổ sung thông tin cho" if resubmitted else "vừa gửi"
+def _notify_approver(
+    db: Session,
+    request: OffRequest,
+    employee: Employee,
+    department: Department,
+    approver: ResolvedApprover,
+    *,
+    update_kind: str | None = None,
+) -> None:
+    event_type = {
+        "EDIT": "TIME_OFF_UPDATED",
+        "RESUBMIT": "TIME_OFF_RESUBMITTED",
+    }.get(update_kind, "TIME_OFF_SUBMITTED")
+    verb = {
+        "EDIT": "đã chỉnh sửa",
+        "RESUBMIT": "đã bổ sung thông tin và gửi lại",
+    }.get(update_kind, "vừa gửi")
     request_label = REQUEST_TYPE_LABELS.get(request.request_type, "yêu cầu")
     dispatch_notification(
         db,
@@ -1078,11 +1092,12 @@ def resubmit_time_off_request(
     current_user: User = Depends(get_current_user),
 ):
     employee = _require_current_employee(db, current_user)
-    request = db.get(OffRequest, request_id)
+    request = db.query(OffRequest).filter(OffRequest.id == request_id).with_for_update().first()
     if not request or not _is_owner(request, current_user, employee):
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn nghỉ.")
-    if _canonical_status(request.status) != MORE_INFO_REQUIRED:
-        raise HTTPException(status_code=409, detail="Chỉ đơn đang yêu cầu bổ sung thông tin mới được cập nhật.")
+    previous_status = _canonical_status(request.status)
+    if previous_status not in {PENDING_MANAGER, MORE_INFO_REQUIRED}:
+        raise HTTPException(status_code=409, detail="Chỉ đơn đang chờ Manager duyệt hoặc đang yêu cầu bổ sung mới được cập nhật.")
     department = _employee_department(db, employee)
     approver = _resolve_selected_approver(db, employee, payload.approver_user_id)
     if not department or not approver:
@@ -1123,7 +1138,7 @@ def resubmit_time_off_request(
         "end_at": request.end_at,
         "day_part": request.day_part,
     }
-    previous_status = _canonical_status(request.status)
+    update_kind = "EDIT" if previous_status == PENDING_MANAGER else "RESUBMIT"
     request.department_id = department.id
     request.approver_user_id = approver.user.id
     request.approver_employee_id = approver.employee.id if approver.employee else None
@@ -1153,19 +1168,23 @@ def resubmit_time_off_request(
             request_id=request.id,
             actor_user_id=current_user.id,
             actor_employee_id=employee.id,
-            action="RESUBMIT",
+            action=update_kind,
             from_status=previous_status,
             to_status=PENDING_MANAGER,
         )
     )
-    _notify_approver(db, request, employee, department, approver, resubmitted=True)
+    _notify_approver(db, request, employee, department, approver, update_kind=update_kind)
     record_audit(
         db,
         actor=current_user,
-        action="TIME_OFF_RESUBMIT",
+        action="TIME_OFF_EDIT" if update_kind == "EDIT" else "TIME_OFF_RESUBMIT",
         resource_type="TIME_OFF_REQUEST",
         resource_id=request.id,
-        summary=f"{employee.full_name} bổ sung và gửi lại đơn nghỉ",
+        summary=(
+            f"{employee.full_name} chỉnh sửa đơn nghỉ đang chờ duyệt"
+            if update_kind == "EDIT"
+            else f"{employee.full_name} bổ sung và gửi lại đơn nghỉ"
+        ),
         before=before,
         after={"status": PENDING_MANAGER, "approver_user_id": approver.user.id},
     )

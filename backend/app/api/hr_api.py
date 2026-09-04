@@ -1,14 +1,22 @@
 from datetime import date
 from typing import Optional
+import json
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
-from sqlalchemy import or_
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_db, get_hr_manager_user
 from app.core.auth import get_password_hash
 from app.core.employee_type import normalize_employee_type
+from app.core.employee_contract import (
+    FIXED_TERM_CONTRACT_TYPES,
+    normalize_contract_type,
+    validate_contract_period,
+)
+from app.api.employees import UPLOAD_DIRECTORY, process_and_save_upload
 from app.models.department import Department
 from app.models.employee import Employee
 from app.models.user import User
@@ -18,6 +26,10 @@ from app.services.access_role_service import (
     infer_employee_access_role,
     sync_all_employee_access_roles,
     sync_employee_access_role,
+)
+from app.services.employee_directory import (
+    is_shared_it_admin_profile,
+    machine_identifier_conflict_detail,
 )
 
 
@@ -29,8 +41,9 @@ router = APIRouter(
 
 
 class HrEmployeePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     machine_employee_id: Optional[str] = Field(default=None, max_length=50)
-    biometric_id: Optional[str] = Field(default=None, max_length=50)
     full_name: Optional[str] = Field(default=None, max_length=150)
     notion_name: Optional[str] = Field(default=None, max_length=150)
     department_id: Optional[int] = None
@@ -47,7 +60,13 @@ class HrEmployeePayload(BaseModel):
     employee_type: Optional[str] = Field(default=None, max_length=50)
     dependents_count: Optional[int] = Field(default=None, ge=0)
     start_date: Optional[date] = None
+    contract_type: Optional[str] = Field(default=None, max_length=30)
+    contract_sign_date: Optional[date] = None
+    contract_start_date: Optional[date] = None
+    contract_end_date: Optional[date] = None
     resignation_period: Optional[str] = Field(default=None, max_length=7)
+    last_working_date: Optional[date] = None
+    last_pay_date: Optional[date] = None
     tax_code: Optional[str] = Field(default=None, max_length=50)
     phone_number: Optional[str] = Field(default=None, max_length=50)
     company_phone_number: Optional[str] = Field(default=None, max_length=50)
@@ -66,7 +85,6 @@ class HrEmployeePayload(BaseModel):
 class HrEmployeeResponse(BaseModel):
     id: int
     machine_employee_id: str
-    biometric_id: str | None
     full_name: str
     notion_name: str | None
     department_id: int | None
@@ -83,7 +101,13 @@ class HrEmployeeResponse(BaseModel):
     employee_type: str
     dependents_count: int
     start_date: str | None
+    contract_type: str | None
+    contract_sign_date: str | None
+    contract_start_date: str | None
+    contract_end_date: str | None
     resignation_period: str | None
+    last_working_date: str | None
+    last_pay_date: str | None
     tax_code: str | None
     phone_number: str | None
     company_phone_number: str | None
@@ -95,6 +119,8 @@ class HrEmployeeResponse(BaseModel):
     notes: str | None
     account_number: str | None
     bank_name: str | None
+    cccd_url: list[str]
+    contract_url: list[str]
     username: str | None
     account_role: str | None = None
     access_role: str = "USER"
@@ -107,6 +133,11 @@ class HrDepartmentPayload(BaseModel):
     manager_id: int | None = None
     parent_id: int | None = None
     sort_order: int = 0
+
+
+class HrDeleteDocumentRequest(BaseModel):
+    url: str
+    doc_type: str
 
 
 class HrDepartmentResponse(BaseModel):
@@ -130,7 +161,6 @@ def _employee_snapshot(employee: Employee) -> dict:
     return {
         "id": employee.id,
         "machine_employee_id": employee.machine_employee_id,
-        "biometric_id": employee.biometric_id,
         "full_name": employee.full_name,
         "notion_name": employee.notion_name,
         "department_id": employee.department_id,
@@ -143,7 +173,13 @@ def _employee_snapshot(employee: Employee) -> dict:
         "position": employee.position,
         "employee_type": employee.employee_type,
         "start_date": employee.start_date,
+        "contract_type": employee.contract_type,
+        "contract_sign_date": employee.contract_sign_date,
+        "contract_start_date": employee.contract_start_date,
+        "contract_end_date": employee.contract_end_date,
         "resignation_period": employee.resignation_period,
+        "last_working_date": employee.last_working_date,
+        "last_pay_date": employee.last_pay_date,
         "company_email": employee.company_email,
         "personal_email": employee.personal_email,
         "phone_number": employee.phone_number,
@@ -151,12 +187,54 @@ def _employee_snapshot(employee: Employee) -> dict:
     }
 
 
+def _hr_document_urls(employee: Employee, doc_type: str) -> list[str]:
+    raw_urls = employee.cccd_url if doc_type == "cccd" else employee.contract_url
+    if not raw_urls:
+        return []
+    try:
+        urls = json.loads(raw_urls)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [
+        f"/api/hr/employees/{employee.id}/documents/{doc_type}/{Path(url).name}"
+        for url in urls
+    ]
+
+
+def _apply_contract_fields(employee: Employee, values: dict, *, creating: bool = False) -> None:
+    changed_fields = set(values) & {
+        "contract_type",
+        "contract_sign_date",
+        "contract_start_date",
+        "contract_end_date",
+    }
+    if not changed_fields and not creating:
+        return
+
+    if "contract_type" in changed_fields or creating:
+        employee.contract_type = normalize_contract_type(values.get("contract_type"))
+    if "contract_sign_date" in changed_fields or creating:
+        employee.contract_sign_date = values.get("contract_sign_date")
+    if employee.contract_type in FIXED_TERM_CONTRACT_TYPES:
+        for field in ("contract_start_date", "contract_end_date"):
+            if field in changed_fields or creating:
+                setattr(employee, field, values.get(field))
+    else:
+        employee.contract_start_date = None
+        employee.contract_end_date = None
+    validate_contract_period(
+        employee.contract_type,
+        employee.contract_sign_date,
+        employee.contract_start_date,
+        employee.contract_end_date,
+    )
+
+
 def _to_employee_response(employee: Employee, db: Session) -> HrEmployeeResponse:
     access_role, access_role_reason = infer_employee_access_role(db, employee)
     return HrEmployeeResponse(
         id=employee.id,
         machine_employee_id=employee.machine_employee_id,
-        biometric_id=employee.biometric_id,
         full_name=employee.full_name,
         notion_name=employee.notion_name,
         department_id=employee.department_id,
@@ -173,7 +251,13 @@ def _to_employee_response(employee: Employee, db: Session) -> HrEmployeeResponse
         employee_type=employee.employee_type,
         dependents_count=employee.dependents_count,
         start_date=employee.start_date.isoformat() if employee.start_date else None,
+        contract_type=employee.contract_type,
+        contract_sign_date=employee.contract_sign_date.isoformat() if employee.contract_sign_date else None,
+        contract_start_date=employee.contract_start_date.isoformat() if employee.contract_start_date else None,
+        contract_end_date=employee.contract_end_date.isoformat() if employee.contract_end_date else None,
         resignation_period=employee.resignation_period,
+        last_working_date=employee.last_working_date.isoformat() if employee.last_working_date else None,
+        last_pay_date=employee.last_pay_date.isoformat() if employee.last_pay_date else None,
         tax_code=employee.tax_code,
         phone_number=employee.phone_number,
         company_phone_number=employee.company_phone_number,
@@ -185,6 +269,8 @@ def _to_employee_response(employee: Employee, db: Session) -> HrEmployeeResponse
         notes=employee.notes,
         account_number=employee.account_number,
         bank_name=employee.bank_name,
+        cccd_url=_hr_document_urls(employee, "cccd"),
+        contract_url=_hr_document_urls(employee, "contract"),
         username=employee.user.username if employee.user else None,
         account_role=employee.user.role if employee.user else None,
         access_role=access_role,
@@ -195,16 +281,15 @@ def _to_employee_response(employee: Employee, db: Session) -> HrEmployeeResponse
 def _validate_identifier(
     db: Session, identifier: str, *, employee_id: int | None = None
 ) -> None:
-    query = db.query(Employee).filter(
-        or_(
-            Employee.machine_employee_id == identifier,
-            Employee.biometric_id == identifier,
-        )
-    )
+    query = db.query(Employee).filter(Employee.machine_employee_id == identifier)
     if employee_id is not None:
         query = query.filter(Employee.id != employee_id)
-    if query.first():
-        raise HTTPException(status_code=409, detail="Mã máy chấm công đã thuộc hồ sơ khác.")
+    owner = query.first()
+    if owner:
+        raise HTTPException(
+            status_code=409,
+            detail=machine_identifier_conflict_detail(identifier, owner),
+        )
 
 
 @router.get("/employees", response_model=list[HrEmployeeResponse])
@@ -227,7 +312,8 @@ def list_hr_employees(
         query = query.filter(Employee.department_id == department_id)
     if is_active is not None:
         query = query.filter(Employee.is_active == is_active)
-    return [_to_employee_response(row, db) for row in query.order_by(Employee.id.asc()).all()]
+    rows = query.order_by(Employee.id.asc()).all()
+    return [_to_employee_response(row, db) for row in rows if not is_shared_it_admin_profile(row)]
 
 
 @router.get("/employees/{employee_id}", response_model=HrEmployeeResponse)
@@ -263,7 +349,6 @@ def create_hr_employee(
 
     employee = Employee(
         machine_employee_id=machine_id,
-        biometric_id=_clean(payload.biometric_id),
         full_name=full_name,
         notion_name=_clean(payload.notion_name),
         department_id=department.id if department else None,
@@ -278,6 +363,8 @@ def create_hr_employee(
         dependents_count=payload.dependents_count or 0,
         start_date=payload.start_date,
         resignation_period=_clean(payload.resignation_period),
+        last_working_date=payload.last_working_date,
+        last_pay_date=payload.last_pay_date,
         tax_code=_clean(payload.tax_code),
         phone_number=_clean(payload.phone_number),
         company_phone_number=_clean(payload.company_phone_number),
@@ -297,6 +384,10 @@ def create_hr_employee(
         other_allowance=0,
         bonus_coefficient=0,
     )
+    try:
+        _apply_contract_fields(employee, payload.model_dump(exclude_unset=True), creating=True)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     db.add(employee)
     db.flush()
 
@@ -359,11 +450,6 @@ def update_hr_employee(
         machine_id = str(values["machine_employee_id"]).strip()
         _validate_identifier(db, machine_id, employee_id=employee.id)
         employee.machine_employee_id = machine_id
-    if "biometric_id" in values:
-        biometric_id = _clean(values["biometric_id"])
-        if biometric_id:
-            _validate_identifier(db, biometric_id, employee_id=employee.id)
-        employee.biometric_id = biometric_id
     if "department_id" in values:
         department = None
         if values["department_id"] is not None:
@@ -389,6 +475,8 @@ def update_hr_employee(
         "dependents_count",
         "start_date",
         "resignation_period",
+        "last_working_date",
+        "last_pay_date",
         "tax_code",
         "phone_number",
         "company_phone_number",
@@ -409,10 +497,27 @@ def update_hr_employee(
             setattr(employee, field, value)
     if "department_name" in values and "department_id" not in values:
         employee.department_name = _clean(values["department_name"])
+    if "status" in values:
+        employee.is_active = values["status"] == "ACTIVE"
+        if values["status"] != "RESIGNED":
+            employee.resignation_period = None
+            employee.last_working_date = None
+            employee.last_pay_date = None
+    elif values.get("is_active") is True:
+        employee.status = "ACTIVE"
+        employee.resignation_period = None
+        employee.last_working_date = None
+        employee.last_pay_date = None
+    if employee.last_working_date:
+        employee.resignation_period = employee.last_working_date.strftime("%Y-%m")
     if "employee_type" in values and values["employee_type"]:
         # Classification only. This endpoint intentionally never mutates any
         # salary or allowance field.
         employee.employee_type = normalize_employee_type(values["employee_type"])
+    try:
+        _apply_contract_fields(employee, values)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
     account_user = employee.user
     username = _clean(values.get("username")) if "username" in values else None
@@ -466,6 +571,105 @@ def update_hr_employee(
         resource_id=employee.id,
     )
     db.commit()
+    db.refresh(employee)
+    return _to_employee_response(employee, db)
+
+
+def _hr_employee_or_404(db: Session, employee_id: int) -> Employee:
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Không tìm thấy nhân viên.")
+    return employee
+
+
+def _stored_document_urls(employee: Employee, doc_type: str) -> list[str]:
+    raw_urls = employee.cccd_url if doc_type == "cccd" else employee.contract_url
+    if not raw_urls:
+        return []
+    try:
+        return list(json.loads(raw_urls))
+    except (TypeError, json.JSONDecodeError):
+        return []
+
+
+def _upload_hr_employee_documents(
+    db: Session,
+    employee: Employee,
+    doc_type: str,
+    files: list[UploadFile],
+) -> HrEmployeeResponse:
+    if doc_type not in {"cccd", "contract"}:
+        raise HTTPException(status_code=400, detail="Loại tài liệu không hợp lệ.")
+    if not files:
+        raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất một tệp.")
+
+    current_urls = _stored_document_urls(employee, doc_type)
+    for file in files:
+        current_urls.append(process_and_save_upload(employee.id, file, doc_type))
+    setattr(employee, "cccd_url" if doc_type == "cccd" else "contract_url", json.dumps(current_urls))
+    db.commit()
+    db.refresh(employee)
+    return _to_employee_response(employee, db)
+
+
+@router.post("/employees/{employee_id}/upload-cccd", response_model=HrEmployeeResponse)
+def upload_hr_employee_cccd(
+    employee_id: int,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+) -> HrEmployeeResponse:
+    return _upload_hr_employee_documents(db, _hr_employee_or_404(db, employee_id), "cccd", files)
+
+
+@router.post("/employees/{employee_id}/upload-contract", response_model=HrEmployeeResponse)
+def upload_hr_employee_contract(
+    employee_id: int,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+) -> HrEmployeeResponse:
+    return _upload_hr_employee_documents(db, _hr_employee_or_404(db, employee_id), "contract", files)
+
+
+@router.get("/employees/{employee_id}/documents/{doc_type}/{filename}")
+def download_hr_employee_document(
+    employee_id: int,
+    doc_type: str,
+    filename: str,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    if doc_type not in {"cccd", "contract"} or Path(filename).name != filename:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu.")
+    employee = _hr_employee_or_404(db, employee_id)
+    referenced_names = {Path(url).name for url in _stored_document_urls(employee, doc_type)}
+    if filename not in referenced_names:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu.")
+    path = UPLOAD_DIRECTORY / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy tệp trên máy chủ.")
+    return FileResponse(path, filename=filename, content_disposition_type="inline")
+
+
+@router.post("/employees/{employee_id}/delete-document", response_model=HrEmployeeResponse)
+def delete_hr_employee_document(
+    employee_id: int,
+    payload: HrDeleteDocumentRequest,
+    db: Session = Depends(get_db),
+) -> HrEmployeeResponse:
+    if payload.doc_type not in {"cccd", "contract"}:
+        raise HTTPException(status_code=400, detail="Loại tài liệu không hợp lệ.")
+    employee = _hr_employee_or_404(db, employee_id)
+    urls = _stored_document_urls(employee, payload.doc_type)
+    target_name = Path(payload.url).name
+    stored_url = next((url for url in urls if Path(url).name == target_name), None)
+    if not stored_url:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu.")
+
+    urls.remove(stored_url)
+    setattr(employee, "cccd_url" if payload.doc_type == "cccd" else "contract_url", json.dumps(urls))
+    db.commit()
+    path = UPLOAD_DIRECTORY / target_name
+    if path.is_file():
+        path.unlink()
     db.refresh(employee)
     return _to_employee_response(employee, db)
 

@@ -1,4 +1,5 @@
 import './time-off-request-intent.css'
+import { AppIcon, type AppIconName } from '../../shared/ui/AppIcon'
 
 export const LEAVE_REQUEST = 'LEAVE_REQUEST'
 export const WORK_FROM_HOME_REQUEST = 'WORK_FROM_HOME_REQUEST'
@@ -17,22 +18,22 @@ type Props = {
   leaveBalance?: LeaveBalance | null
 }
 
-const intents = [
+const intents: Array<{ value: string; icon: AppIconName; title: string; description: string }> = [
   {
     value: LEAVE_REQUEST,
-    icon: '👋',
+    icon: 'leave',
     title: 'Leave Request',
     description: 'Nghỉ có phép, tính lương sau khi được duyệt.',
   },
   {
     value: WORK_FROM_HOME_REQUEST,
-    icon: '🏠',
+    icon: 'home',
     title: 'Work From Home Request',
     description: 'Đề nghị làm việc tại nhà, hưởng lương sau khi được duyệt.',
   },
   {
     value: BUSINESS_TRAVEL_REQUEST,
-    icon: '💼',
+    icon: 'briefcase',
     title: 'Business Travel Request',
     description: 'Đề nghị đi công tác theo quy định của công ty.',
   },
@@ -63,7 +64,7 @@ export function TimeOffRequestIntent({ value, onChange, leaveBalance }: Props) {
             onClick={() => onChange(intent.value)}
             aria-pressed={value === intent.value}
           >
-            <span className="time-off-intent-icon" aria-hidden="true">{intent.icon}</span>
+            <span className="time-off-intent-icon"><AppIcon name={intent.icon} size={17} /></span>
             <span><strong>{intent.title}</strong><small>{intent.description}</small></span>
           </button>
         ))}

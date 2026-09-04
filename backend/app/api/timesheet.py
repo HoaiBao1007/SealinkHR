@@ -30,6 +30,7 @@ class TimesheetSummary(BaseModel):
     period_start: str
     period_end: str
     total_work_days: float
+    total_payroll_days: float
     total_late_minutes: int
     total_absent_days: float
     total_paid_leave_days: float
@@ -61,6 +62,7 @@ class TimesheetGridRow(BaseModel):
     total_early_minutes: int
     total_absent_days: float
     total_work_days: float
+    total_payroll_days: float
     unpaid_leave_days: float
     paid_leave_days: float
     previous_paid_leave_balance: float
@@ -131,6 +133,11 @@ def get_timesheets(
                 period_start=str(t.period_start),
                 period_end=str(t.period_end),
                 total_work_days=float(t.total_work_days),
+                total_payroll_days=(
+                    float(t.total_payroll_days)
+                    if t.total_payroll_days is not None
+                    else float(t.total_work_days or 0) + float(t.total_paid_leave_days or 0)
+                ),
                 total_late_minutes=t.total_late_minutes,
                 total_absent_days=float(t.total_absent_days),
                 total_paid_leave_days=float(t.total_paid_leave_days),
@@ -231,6 +238,7 @@ def get_timesheet_grid(
                 total_early_minutes=row.total_early_minutes,
                 total_absent_days=row.total_absent_days,
                 total_work_days=row.total_work_days,
+                total_payroll_days=row.total_payroll_days,
                 unpaid_leave_days=row.unpaid_leave_days,
                 paid_leave_days=row.paid_leave_days,
                 previous_paid_leave_balance=row.previous_paid_leave_balance,
@@ -267,7 +275,33 @@ def lock_timesheet_period(
         period.is_locked = payload.is_locked
         period.locked_by_user_id = admin.id if payload.is_locked else None
         period.locked_at = datetime.now(timezone.utc) if payload.is_locked else None
-        
+
+    db.flush()
+
+    if payload.is_locked:
+        current_timesheets = (
+            db.query(Timesheet)
+            .filter(
+                Timesheet.period_start == payload.period_start,
+                Timesheet.period_end == payload.period_end,
+            )
+            .all()
+        )
+        for row in current_timesheets:
+            row.previous_paid_leave_balance = None
+            row.current_month_paid_leave_credit = None
+            row.remaining_paid_leave_days = None
+        db.flush()
+
+        report = build_final_timesheet_report_from_db(db, payload.period_start, payload.period_end)
+        report_by_employee = {row.employee_id: row for row in report.rows}
+        for row in current_timesheets:
+            report_row = report_by_employee.get(row.employee_id)
+            if report_row is not None:
+                row.previous_paid_leave_balance = report_row.previous_paid_leave_balance
+                row.current_month_paid_leave_credit = report_row.current_month_paid_leave_credit
+                row.remaining_paid_leave_days = report_row.remaining_paid_leave_days
+
     if payload.is_locked and not was_locked:
         employee_ids = [
             row[0]

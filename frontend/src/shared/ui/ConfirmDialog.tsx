@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 
 type ConfirmOptions = {
@@ -32,8 +33,8 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
   return (
     <ConfirmDialogContext.Provider value={{ confirm }}>
       {children}
-      {options && (
-        <div className="ui-modal-backdrop" role="presentation" onMouseDown={() => close(false)}>
+      {options && typeof document !== 'undefined' && createPortal((
+        <div className="ui-modal-backdrop ui-confirm-dialog-backdrop" role="presentation" onMouseDown={() => close(false)}>
           <section
             aria-describedby="confirm-dialog-description"
             aria-labelledby="confirm-dialog-title"
@@ -52,7 +53,7 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
             </div>
           </section>
         </div>
-      )}
+      ), document.body)}
     </ConfirmDialogContext.Provider>
   )
 }

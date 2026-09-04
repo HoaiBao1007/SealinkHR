@@ -35,6 +35,7 @@ export type NotificationItem = {
     request_status?: string | null
   }
   target_name?: string | null
+  sender_name?: string | null
   created_at: string
   is_read: boolean
 }
@@ -211,7 +212,7 @@ export function NotificationWidget({ apiRequest, onNavigate }: NotificationWidge
                   {categoryLabels[item.category] || item.category}
                 </span>
                 <strong>{item.title}</strong>
-                {item.target_name && <span className="notification-recipient">Người nhận: {item.target_name}</span>}
+                {item.sender_name && <span className="notification-recipient">Người gửi: {item.sender_name}</span>}
                 <span className="notification-message">{item.message}</span>
                 <time>{formatTime(item.created_at)}</time>
               </button>

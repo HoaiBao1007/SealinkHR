@@ -86,6 +86,7 @@ function Resolve-MariaDbTool {
     }
 
     $searchPatterns = @(
+        "D:\xampp\mysql\bin\*",
         "C:\Program Files\MariaDB *\bin\*",
         "C:\Program Files\MySQL\MySQL Server *\bin\*",
         "C:\xampp\mysql\bin\*"

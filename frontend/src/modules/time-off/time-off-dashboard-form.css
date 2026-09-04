@@ -194,6 +194,13 @@
 .time-off-dashboard-fields > .time-off-intent-selector { grid-column: 1 / -1; }
 .time-off-dashboard-fields > .date-time-range { grid-column: 1 / -1; }
 
+.time-off-dashboard-fields > .date-time-range.is-compact .date-time-range-summary strong,
+.time-off-dashboard-fields > .date-time-range.is-compact .date-time-range-summary > span,
+.time-off-dashboard-fields > .date-time-range.is-compact .date-time-range-trigger > small,
+.time-off-dashboard-fields > .date-time-range.is-compact .date-time-range-chevron {
+  color: #ffffff;
+}
+
 .time-off-dashboard-fields label {
   display: flex;
   min-width: 0;

@@ -802,6 +802,7 @@ def sync_notion_work_from_home_to_attendance_db(
     from app.models.timesheet_entry import TimesheetEntry
     from app.services.final_timesheet_report import (
         _absent_units_for_symbol,
+        _clocked_work_units_for_symbol,
         _paid_leave_units_for_symbol,
         _work_units_for_symbol,
     )
@@ -933,7 +934,10 @@ def sync_notion_work_from_home_to_attendance_db(
         if timesheet is None:
             continue
         entries = db.query(TimesheetEntry).filter(TimesheetEntry.timesheet_id == timesheet.id).all()
-        timesheet.total_work_days = float(sum(_work_units_for_symbol(entry.final_symbol) for entry in entries))
+        timesheet.total_work_days = float(sum(
+            _clocked_work_units_for_symbol(entry.final_symbol, entry.check_in_time, entry.check_out_time)
+            for entry in entries
+        ))
         timesheet.total_paid_leave_days = float(sum(_paid_leave_units_for_symbol(entry.final_symbol) for entry in entries))
         absent_days = float(sum(_absent_units_for_symbol(entry.final_symbol) for entry in entries))
         timesheet.total_unpaid_leave_days = absent_days
@@ -941,13 +945,22 @@ def sync_notion_work_from_home_to_attendance_db(
         timesheet.total_late_minutes = sum(int(entry.late_minutes or 0) for entry in entries)
         timesheet.total_business_trip_days = float(sum(1.0 for entry in entries if entry.final_symbol == "CT"))
 
+        # Once accounting has supplied an approved "Ngày công", WFH/leave
+        # reconciliation may update actual attendance but must not overwrite
+        # that independent payroll value. Draft/legacy rows still receive a
+        # derived provisional value until the accountant workbook is imported.
+        if timesheet.total_payroll_days is None or str(timesheet.approval_status or "").lower() != "approved":
+            timesheet.total_payroll_days = float(
+                sum(_work_units_for_symbol(entry.final_symbol) for entry in entries)
+            ) + timesheet.total_paid_leave_days
+
         salary_period = period_end.strftime("%Y-%m")
         salary_input = db.query(MonthlySalaryInput).filter(
             MonthlySalaryInput.employee_id == timesheet.employee_id,
             MonthlySalaryInput.salary_period == salary_period,
         ).first()
         if salary_input is not None:
-            salary_input.actual_working_days = timesheet.total_work_days + timesheet.total_paid_leave_days
+            salary_input.actual_working_days = timesheet.total_payroll_days
 
     db.commit()
     return affected_dates

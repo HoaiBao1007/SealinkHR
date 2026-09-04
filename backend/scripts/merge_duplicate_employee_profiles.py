@@ -141,14 +141,6 @@ def _verify_pair(canonical: Employee | None, duplicate: Employee | None, pair: M
 
 
 def _merge_employee_fields(canonical: Employee, duplicate: Employee) -> None:
-    if canonical.biometric_id is None:
-        canonical.biometric_id = duplicate.machine_employee_id
-    elif canonical.biometric_id != duplicate.machine_employee_id:
-        raise RuntimeError(
-            f"Hồ sơ {canonical.id} đã có mã sinh trắc học {canonical.biometric_id}; "
-            f"không thể tự gán thêm {duplicate.machine_employee_id}."
-        )
-
     optional_fields = (
         "position",
         "start_date",
@@ -512,7 +504,7 @@ def merge_pair(db, pair: MergePair) -> dict[str, object]:
         "canonical_id": canonical.id,
         "duplicate_id": duplicate.id,
         "name": canonical.full_name,
-        "alternate_biometric_id": duplicate.machine_employee_id,
+        "retired_duplicate_machine_id": duplicate.machine_employee_id,
         "attendance_logs": _merge_attendance_logs(db, canonical.id, duplicate.id),
         "attendance_daily": _merge_attendance_daily(db, canonical.id, duplicate.id),
         "timesheets": _merge_timesheets(db, canonical.id, duplicate.id),

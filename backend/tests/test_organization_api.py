@@ -97,3 +97,57 @@ def test_organization_chart_uses_live_department_and_assignment_metadata(client,
     assert export_payload["members"][0]["company_phone_number"] == "02873075768"
     assert export_payload["members"][1]["reports_to_employee_id"] == leader.id
     assert export_payload["members"][2]["source"] == "DEPARTMENT"
+
+
+def test_departed_employees_are_removed_from_chart_and_department_members(client, db_session):
+    department = Department(name="CURRENT TEAM")
+    db_session.add(department)
+    db_session.flush()
+
+    active_employee = Employee(
+        machine_employee_id="ORG-ACTIVE",
+        full_name="Current Employee",
+        department_id=department.id,
+        is_active=True,
+        status="ACTIVE",
+    )
+    resigned_employee = Employee(
+        machine_employee_id="ORG-RESIGNED",
+        full_name="Resigned Employee",
+        department_id=department.id,
+        is_active=True,
+        status="RESIGNED",
+        resignation_period="2026-08",
+    )
+    inactive_employee = Employee(
+        machine_employee_id="ORG-INACTIVE",
+        full_name="Inactive Employee",
+        department_id=department.id,
+        is_active=False,
+        status="INACTIVE",
+    )
+    db_session.add_all([active_employee, resigned_employee, inactive_employee])
+    db_session.flush()
+    department.manager_id = resigned_employee.id
+
+    unit = OrganizationUnit(
+        code="CURRENT_TEAM",
+        name="CURRENT TEAM",
+        unit_type="DEPARTMENT",
+        linked_department_id=department.id,
+    )
+    db_session.add(unit)
+    db_session.commit()
+
+    chart_response = client.get("/api/organization/chart")
+    assert chart_response.status_code == 200
+    chart_payload = chart_response.json()
+    assert chart_payload["employee_count"] == 1
+    unit_payload = next(row for row in chart_payload["units"] if row["code"] == "CURRENT_TEAM")
+    assert [row["employee_id"] for row in unit_payload["members"]] == [active_employee.id]
+
+    departments_response = client.get("/api/departments")
+    assert departments_response.status_code == 200
+    department_payload = next(row for row in departments_response.json() if row["id"] == department.id)
+    assert department_payload["manager"] is None
+    assert [row["id"] for row in department_payload["employees"]] == [active_employee.id]

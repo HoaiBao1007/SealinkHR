@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { AppIcon } from '../../shared/ui/AppIcon'
 
 type RawCheckinDayEntry = {
   day_label: string
@@ -22,7 +23,6 @@ type EmployeeBlockFilters = {
 type PreviewEmployee = {
   id: number
   machine_employee_id: string
-  biometric_id: string | null
   full_name: string
   department_name: string | null
 }
@@ -92,11 +92,7 @@ function getTimeChipClassName(value: string): string {
 }
 
 function findMatchedEmployee(block: RawCheckinEmployeeBlock, employees: PreviewEmployee[]): PreviewEmployee | undefined {
-  return employees.find(
-    (employee) =>
-      employee.machine_employee_id === block.employee_id ||
-      (employee.biometric_id != null && employee.biometric_id === block.employee_id),
-  )
+  return employees.find((employee) => employee.machine_employee_id === block.employee_id)
 }
 
 function TimeValuesRender({ times }: { times: string[] }) {
@@ -135,10 +131,10 @@ function TimeValuesRender({ times }: { times: string[] }) {
           …
         </button>
         <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 hidden w-52 -translate-x-1/2 rounded-2xl border border-slate-300 bg-white/95 p-3 shadow-xl backdrop-blur-sm group-hover:block group-focus-within:block">
-          <p className="mb-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500">Lịch sử quét thẻ trong ngày</p>
+          <p className="mb-2 text-center text-[11px] font-bold uppercase tracking-wide text-slate-500">Lịch sử quét thẻ trong ngày</p>
           <div className="grid grid-cols-3 gap-1">
             {times.map((value, index) => (
-              <span key={`${value}-${index}`} className={`rounded border px-1 py-1 text-center text-[10px] font-semibold leading-none ${getTimeChipClassName(value)}`}>
+              <span key={`${value}-${index}`} className={`rounded border px-1 py-1 text-center text-[11px] font-semibold leading-none ${getTimeChipClassName(value)}`}>
                 {value}
               </span>
             ))}
@@ -168,7 +164,7 @@ function EmployeeAttendanceDetail({
           onClick={onBack}
           className="mb-4 inline-flex items-center rounded-xl border border-slate-300 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-200"
         >
-          ← Quay lại danh sách nhân viên
+          <AppIcon name="arrow-left" size={15} /> Quay lại danh sách nhân viên
         </button>
 
         <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto] lg:items-center">
@@ -198,7 +194,7 @@ function EmployeeAttendanceDetail({
               <article key={`${block.employee_id}-${entry.day_label}`} className="relative overflow-visible rounded-[18px] border border-[#D6E6F4] bg-white p-3 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.4)] transition hover:border-sky-200">
                 <div className="flex items-start justify-between gap-3">
                   <h4 className="text-[26px] font-bold leading-none tracking-[-0.03em] text-[#0B74B4]">{entry.day_label}</h4>
-                  <span className={hasAlertValue ? 'rounded-full bg-red-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-red-600' : 'rounded-full bg-sky-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-sky-700'}>
+                  <span className={hasAlertValue ? 'rounded-full bg-red-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-red-600' : 'rounded-full bg-sky-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-sky-700'}>
                     {displayValues.length} mốc giờ
                   </span>
                 </div>

@@ -9,7 +9,7 @@ from app.models.attendance_override_audit import AttendanceOverrideAudit
 from app.models.monthly_salary_input import MonthlySalaryInput
 from app.models.salary_policy import SalaryPolicy
 from app.models.user import User
-from app.models.commission import CommissionPeriod, CommissionJob, CommissionRepOverride, CommissionWalletLedger, CommissionPayoutPolicy, CommissionCalculationSnapshot, CommissionBonusEntitlement, CommissionPayoutSchedule, CommissionPayoutScheduleAllocation
+from app.models.commission import CommissionPeriod, CommissionJob, CommissionJobReceivableAttachment, CommissionJobReceivableLink, CommissionRepOverride, CommissionWalletLedger, CommissionPayoutPolicy, CommissionCalculationSnapshot, CommissionBonusEntitlement, CommissionPayoutSchedule, CommissionPayoutScheduleAllocation
 from app.models.department import Department
 from app.models.salary_decision import SalaryDecision
 from app.models.department_bonus_config import DepartmentBonusConfig
@@ -19,6 +19,9 @@ from app.models.organization import OrganizationUnit, OrganizationAssignment
 from app.models.system_audit_event import SystemAuditEvent
 from app.models.trusted_device import TrustedDevice
 from app.models.notification import Notification, NotificationRead
+from app.models.onboarding import OnboardingAttachment, OnboardingFormVersion, OnboardingSubmission
+from app.models.offboarding import OffboardingAction, OffboardingAttachment, OffboardingFormVersion, OffboardingRequest
+from app.models.salary_approval_workflow import SalaryApprovalWorkflow
 
 __all__ = [
 	"Employee",
@@ -36,6 +39,8 @@ __all__ = [
 	"User",
 	"CommissionPeriod",
 	"CommissionJob",
+	"CommissionJobReceivableAttachment",
+	"CommissionJobReceivableLink",
 	"CommissionRepOverride",
 	"CommissionWalletLedger",
 	"CommissionPayoutPolicy",
@@ -54,4 +59,12 @@ __all__ = [
 	"TrustedDevice",
 	"Notification",
 	"NotificationRead",
+	"OnboardingFormVersion",
+	"OnboardingSubmission",
+	"OnboardingAttachment",
+	"OffboardingRequest",
+	"OffboardingAction",
+	"OffboardingAttachment",
+	"OffboardingFormVersion",
+	"SalaryApprovalWorkflow",
 ]

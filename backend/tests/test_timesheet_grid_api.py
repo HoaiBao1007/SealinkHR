@@ -54,7 +54,7 @@ def test_get_timesheet_grid(client, seed_timesheet_data, seed_basic_employees, d
     assert len(payload["day_keys"]) == 30
     assert len(payload["rows"]) == 1
 
-    row = payload["rows"][0]
+    row = next(item for item in payload["rows"] if item["employee_id"] == worker.id)
     assert row["employee_id"] == worker.id
     assert row["days"]["2026-04-23"] == "X"
     assert row["days"]["2026-04-24"] == "X"
@@ -79,7 +79,8 @@ def test_timesheet_grid_uses_vietnamese_employee_name(client, seed_timesheet_dat
     )
 
     assert response.status_code == 200
-    assert response.json()["rows"][0]["full_name"] == "ĐẶNG HOÀI BẢO"
+    row = next(item for item in response.json()["rows"] if item["employee_id"] == worker.id)
+    assert row["full_name"] == "ĐẶNG HOÀI BẢO"
 
 
 def test_get_timesheet_grid_applies_hr_matrix_and_leave_summary(client, seed_timesheet_data, seed_basic_employees, db_session: Session):
@@ -175,7 +176,7 @@ def test_get_timesheet_grid_applies_hr_matrix_and_leave_summary(client, seed_tim
 
     assert response.status_code == 200
     payload = response.json()
-    row = payload["rows"][0]
+    row = next(item for item in payload["rows"] if item["employee_id"] == worker.id)
     assert payload["day_columns"][2]["weekday_label"] == "T7"
     assert payload["day_columns"][3]["weekday_label"] == "CN"
     assert row["days"]["2026-04-23"] == "X"
@@ -186,4 +187,4 @@ def test_get_timesheet_grid_applies_hr_matrix_and_leave_summary(client, seed_tim
     assert row["days"]["2026-04-28"] == "Ro"
     assert row["paid_leave_days"] == 1.5
     assert row["unpaid_leave_days"] == 1.0
-    assert row["remaining_paid_leave_days"] == 10.5
+    assert row["remaining_paid_leave_days"] == 11.5

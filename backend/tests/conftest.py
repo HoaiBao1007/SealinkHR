@@ -33,6 +33,14 @@ from app.models import (
     MonthlySalaryInput,
     Notification,
     NotificationRead,
+    OnboardingAttachment,
+    OnboardingFormVersion,
+    OnboardingSubmission,
+    OffboardingAction,
+    OffboardingAttachment,
+    OffboardingFormVersion,
+    OffboardingRequest,
+    SalaryApprovalWorkflow,
 )
 
 
@@ -63,6 +71,8 @@ def clean_database() -> Generator[None, None, None]:
             CommissionBonusEntitlement,
             CommissionCalculationSnapshot,
             CommissionJob,
+            CommissionJobReceivableAttachment,
+            CommissionJobReceivableLink,
             CommissionPayoutPolicy,
             CommissionPayoutSchedule,
             CommissionPayoutScheduleAllocation,
@@ -76,6 +86,8 @@ def clean_database() -> Generator[None, None, None]:
         db.execute(delete(CommissionWalletLedger))
         db.execute(delete(CommissionPaymentVerification))
         db.execute(delete(CommissionBonusLock))
+        db.execute(delete(CommissionJobReceivableLink))
+        db.execute(delete(CommissionJobReceivableAttachment))
         db.execute(delete(CommissionPayoutSchedule))
         db.execute(delete(CommissionBonusEntitlement))
         db.execute(delete(CommissionCalculationSnapshot))
@@ -85,6 +97,13 @@ def clean_database() -> Generator[None, None, None]:
         db.execute(delete(CommissionPayoutPolicy))
         db.execute(delete(NotificationRead))
         db.execute(delete(Notification))
+        db.execute(delete(OnboardingAttachment))
+        db.execute(delete(OnboardingSubmission))
+        db.execute(delete(OnboardingFormVersion))
+        db.execute(delete(OffboardingAttachment))
+        db.execute(delete(OffboardingAction))
+        db.execute(delete(OffboardingRequest))
+        db.execute(delete(OffboardingFormVersion))
         db.execute(delete(SystemAuditEvent))
         db.execute(delete(TrustedDevice))
         db.execute(delete(AttendanceOverrideAudit))
@@ -105,6 +124,7 @@ def clean_database() -> Generator[None, None, None]:
         db.execute(delete(OrganizationUnit))
         db.execute(delete(DepartmentBonusConfig))
         db.execute(delete(Department))
+        db.execute(delete(SalaryApprovalWorkflow))
         db.execute(delete(MonthlySalaryInput))
         db.execute(delete(SalaryDecision))
         db.execute(delete(Employee))
@@ -163,7 +183,6 @@ def client() -> Generator[TestClient, None, None]:
 def seed_basic_employees(db_session: Session) -> dict[str, Employee]:
     uploader = Employee(
         machine_employee_id="U001",
-        biometric_id="U001",
         full_name="Uploader User",
         department_code="HR",
         department_name="Human Resource",
@@ -175,7 +194,6 @@ def seed_basic_employees(db_session: Session) -> dict[str, Employee]:
     )
     worker = Employee(
         machine_employee_id="E001",
-        biometric_id="E001",
         full_name="Nguyen Van A",
         department_code="OPS",
         department_name="Operations",
@@ -187,7 +205,6 @@ def seed_basic_employees(db_session: Session) -> dict[str, Employee]:
     )
     approver = Employee(
         machine_employee_id="M001",
-        biometric_id="M001",
         full_name="Manager B",
         department_code="MGT",
         department_name="Management",

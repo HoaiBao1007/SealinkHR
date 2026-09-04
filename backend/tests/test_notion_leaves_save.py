@@ -9,6 +9,7 @@ from app.models.off_request import OffRequest
 from app.models.timesheet import Timesheet
 from app.models.timesheet_entry import TimesheetEntry
 from app.models.attendance_daily import AttendanceDaily
+from app.models.monthly_salary_input import MonthlySalaryInput
 from app.services.notion_leave_reconciliation import (
     save_notion_leaves_to_db,
     sync_notion_work_from_home_to_attendance_db,
@@ -348,6 +349,22 @@ def test_wfh_is_persisted_as_work_without_creating_an_off_request(db_session: Se
     )
     db_session.add(employee)
     db_session.commit()
+    timesheet = Timesheet(
+        employee_id=employee.id,
+        period_start=date(2026, 6, 23),
+        period_end=date(2026, 7, 22),
+        approval_status="approved",
+        total_work_days=20,
+        total_payroll_days=23,
+        total_paid_leave_days=2.5,
+    )
+    salary_input = MonthlySalaryInput(
+        employee_id=employee.id,
+        salary_period="2026-07",
+        actual_working_days=23,
+    )
+    db_session.add_all([timesheet, salary_input])
+    db_session.commit()
     db_session.add(
         AttendanceDaily(
             employee_id=employee.id,
@@ -382,3 +399,8 @@ def test_wfh_is_persisted_as_work_without_creating_an_off_request(db_session: Se
     assert all(row.attendance_symbol == "X" for row in daily_rows)
     assert all(row.abnormal_level is None for row in daily_rows)
     assert db_session.query(OffRequest).filter(OffRequest.employee_id == employee.id).count() == 0
+    db_session.refresh(timesheet)
+    db_session.refresh(salary_input)
+    assert float(timesheet.total_work_days) == 0
+    assert float(timesheet.total_payroll_days) == 23
+    assert salary_input.actual_working_days == 23

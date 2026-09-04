@@ -6,6 +6,7 @@ class HolidaySettingBase(BaseModel):
     holiday_name: str = Field(..., max_length=255)
     holiday_date: date
     is_custom: bool = False
+    is_working_day: bool = False
 
 class HolidaySettingCreate(HolidaySettingBase):
     pass
@@ -14,6 +15,7 @@ class HolidaySettingUpdate(BaseModel):
     holiday_name: Optional[str] = None
     holiday_date: Optional[date] = None
     is_custom: Optional[bool] = None
+    is_working_day: Optional[bool] = None
 
 class HolidaySettingResponse(HolidaySettingBase):
     id: int
@@ -26,3 +28,4 @@ class HolidaySettingBulkCreate(BaseModel):
     start_date: date
     end_date: date
     is_custom: bool = False
+    is_working_day: bool = False

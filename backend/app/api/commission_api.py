@@ -11,18 +11,21 @@ Endpoints:
   DELETE /api/commission/periods/{id}  - Xóa 1 kỳ (và tất cả jobs)
 """
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Literal
 import json
 import re
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_admin_user
-from app.models.commission import CommissionBonusLock, CommissionJob, CommissionPeriod, CommissionPayoutPolicy, CommissionRepOverride, CommissionWalletLedger, CommissionCalculationSnapshot, CommissionBonusEntitlement, CommissionPayoutSchedule, CommissionPayoutScheduleAllocation, CommissionPaymentVerification
+from app.models.commission import CommissionBonusLock, CommissionJob, CommissionJobReceivableAttachment, CommissionJobReceivableLink, CommissionPeriod, CommissionPayoutPolicy, CommissionRepOverride, CommissionWalletLedger, CommissionCalculationSnapshot, CommissionBonusEntitlement, CommissionPayoutSchedule, CommissionPayoutScheduleAllocation, CommissionPaymentVerification
+from app.services.commission_receivable_parser import FIXED_HOLD_BONUS_PERCENT, ReceivableJobBalance, parse_receivable_workbook, normalize_receivable_job_no
 from app.services.notification_service import BONUS, actor_id, add_employee_notification
 
 router = APIRouter(
@@ -30,6 +33,13 @@ router = APIRouter(
     tags=["commission"],
     dependencies=[Depends(get_admin_user)],
 )
+
+COMMISSION_RECEIVABLE_UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads" / "commission_receivables"
+COMMISSION_RECEIVABLE_MAX_FILE_SIZE = 15 * 1024 * 1024
+COMMISSION_RECEIVABLE_MAX_FILES = 10
+COMMISSION_RECEIVABLE_ALLOWED_EXTENSIONS = {
+    ".pdf", ".xlsx", ".xls", ".csv", ".doc", ".docx", ".png", ".jpg", ".jpeg",
+}
 
 
 # ══════════════════════════════════════════════════════
@@ -71,6 +81,15 @@ class CommissionImportIn(BaseModel):
     jobs: List[JobRowIn]
 
 
+class CommissionImportBatchIn(BaseModel):
+    imports: List[CommissionImportIn]
+
+
+class CommissionImportMergeIn(BaseModel):
+    imports: List[CommissionImportIn]
+    overwrite_manual_job_ids: List[int] = Field(default_factory=list)
+
+
 class CommissionRepOverrideIn(BaseModel):
     override_job_count: Optional[int] = None
     override_profit_loss: Optional[float] = None
@@ -108,6 +127,23 @@ class CommissionJobPaymentIn(BaseModel):
     # payroll month of the following commission cycle.
     release_mode: Optional[Literal["NEXT_QUARTER_LUMP"]] = None
     release_payout_period: Optional[str] = None
+
+
+class CommissionJobManualPaymentIn(BaseModel):
+    """Administrative correction of the receivable evidence for one JOB."""
+
+    payment_received: Literal["YES", "NO"]
+    payment_received_amount: Optional[float] = Field(default=None, ge=0)
+    payment_month: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+    payment_date: Optional[date] = None
+    payout_months: Optional[list[str]] = None
+    remark: Optional[str] = None
+
+
+class CommissionJobHoldBonusIn(BaseModel):
+    hold_bonus_percent: Optional[float] = None
+    hold_bonus_amount: Optional[float] = None
+    edited_field: Optional[Literal["percent", "amount"]] = None
 
 
 class CommissionPaymentReportIn(BaseModel):
@@ -190,6 +226,15 @@ class CommissionScheduleActionIn(BaseModel):
     note: Optional[str] = None
 
 
+class CommissionScheduleCancelIn(BaseModel):
+    reason: str
+
+
+class MonthlyCommissionPayoutOut(BaseModel):
+    payout_period: str
+    amount: float
+
+
 class SalesRepSummaryOut(BaseModel):
     sales_rep: str
     job_count: int
@@ -200,6 +245,8 @@ class SalesRepSummaryOut(BaseModel):
     target: float = 0.0
     bonus_rate: float = 0.0
     total_bonus_quarter: float = 0.0
+    payment_received_total: float = 0.0
+    hold_bonus_total: float = 0.0
     employee_salary: float = 0.0
     coefficient: float = 0.0
     is_pnl_overridden: bool = False
@@ -210,6 +257,7 @@ class SalesRepSummaryOut(BaseModel):
     remark: Optional[str] = ""
     bonus_rules: list = []
     uses_progressive_bonus: bool = True
+    monthly_payouts: List[MonthlyCommissionPayoutOut] = Field(default_factory=list)
 
 
 class PeriodSummaryOut(BaseModel):
@@ -222,6 +270,7 @@ class PeriodSummaryOut(BaseModel):
     total_profit_loss: float
     created_at: str
     created_by: Optional[str]
+    payout_periods: List[str] = Field(default_factory=list)
     sales_rep_summary: List[SalesRepSummaryOut]
 
 
@@ -234,6 +283,7 @@ class PeriodListOut(BaseModel):
     job_count: int
     total_profit_loss: float
     created_at: str
+    payout_periods: List[str] = Field(default_factory=list)
     sales_rep_summary: List[SalesRepSummaryOut] = []
 
 
@@ -281,16 +331,8 @@ def _parse_date(s: Optional[str]) -> Optional[date]:
 # ══════════════════════════════════════════════════════
 # POST /api/commission/import
 # ══════════════════════════════════════════════════════
-@router.post("/import", status_code=status.HTTP_201_CREATED)
-def import_commission(
-    payload: CommissionImportIn,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_admin_user),
-):
-    """
-    Nhận toàn bộ dữ liệu jobs từ frontend (sau khi user preview và xác nhận),
-    tạo một CommissionPeriod mới và lưu tất cả CommissionJob vào DB.
-    """
+def _persist_commission_import(db: Session, payload: CommissionImportIn, current_user) -> CommissionPeriod:
+    """Stage one validated Climax import without committing the transaction."""
     if not payload.jobs:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -352,17 +394,306 @@ def import_commission(
                 profit_loss=j.profit_loss,
                 container_picked=j.container_picked,
                 payment_received=j.payment_received,
+                hold_bonus_percent=FIXED_HOLD_BONUS_PERCENT,
+                hold_bonus_amount=round(
+                    max(0.0, float(j.profit_loss or 0.0)) * FIXED_HOLD_BONUS_PERCENT / 100,
+                    2,
+                ),
             )
         )
 
     db.add_all(jobs_to_insert)
+    return period
+
+
+_COMMISSION_IMPORT_JOB_FIELDS = (
+    "job_no", "job_date", "hbl", "mbl", "customer", "vendor", "sales_rep",
+    "shipper", "consignee", "sub_type", "container_string", "wt", "vol",
+    "carrier_booking_no", "por", "final_destination", "realized_revenue",
+    "unrealized_revenue", "realized_cost", "unrealized_cost", "profit_loss",
+    "container_picked", "payment_received",
+)
+
+
+def _exact_import_period(db: Session, payload: CommissionImportIn) -> Optional[CommissionPeriod]:
+    source_from_date = _parse_date(payload.from_date)
+    source_till_date = _parse_date(payload.till_date)
+    if not source_from_date or not source_till_date:
+        return None
+    return (
+        db.query(CommissionPeriod)
+        .filter(
+            CommissionPeriod.is_voided.is_(False),
+            CommissionPeriod.from_date == source_from_date,
+            CommissionPeriod.till_date == source_till_date,
+        )
+        .order_by(CommissionPeriod.created_at.desc(), CommissionPeriod.id.desc())
+        .first()
+    )
+
+
+def _manual_job_edit_reasons(db: Session, job: CommissionJob) -> list[str]:
+    """Explain why an existing JOB must not be overwritten implicitly.
+
+    Imported P&L columns have no updated-at flag, so protected state is derived
+    from the accounting fields and immutable workflow/audit records that are
+    only created after a user reviews or edits the JOB.
+    """
+    reasons: list[str] = []
+    if job.bonus_remark:
+        reasons.append("Đã có ghi chú thủ công")
+    if any(value is not None for value in (
+        job.receivable_amount,
+        job.balance_amount,
+        job.payment_received_amount,
+    )) or job.receivable_attachments or job.receivable_links:
+        reasons.append("Đã đối chiếu hoặc đính kèm công nợ")
+
+    verification = db.query(CommissionPaymentVerification.id).filter(
+        CommissionPaymentVerification.job_id == job.id,
+    ).first()
+    if verification:
+        reasons.append("Đã có quy trình xác minh thanh toán")
+
+    manual_entry_types = {
+        "MANUAL_CREDIT", "MANUAL_DECREASE", "MANUAL_HOLD", "MANUAL_RELEASE",
+        "MANUAL_CREDIT_REVERSAL", "MANUAL_DECREASE_REVERSAL",
+        "MANUAL_HOLD_REVERSAL", "MANUAL_RELEASE_REVERSAL",
+        "PAYMENT_REPORTED", "PAYMENT_VERIFIED", "PAYMENT_RELEASE_ALLOCATION",
+        "SCHEDULED", "SCHEDULE_RELEASE", "PAID", "TRANSFER_OUT", "TRANSFER_IN",
+    }
+    manual_ledger = db.query(CommissionWalletLedger.entry_type).filter(
+        CommissionWalletLedger.period_id == job.period_id,
+        CommissionWalletLedger.job_id == job.id,
+        CommissionWalletLedger.entry_type.in_(manual_entry_types),
+    ).first()
+    if manual_ledger:
+        reasons.append("Đã phát sinh điều chỉnh hoặc lịch sử ví thưởng")
+
+    return reasons
+
+
+def _apply_imported_job_fields(target: CommissionJob, source: JobRowIn) -> None:
+    from app.services.commission_wallet_rules import calculate_job_hold
+
+    values = source.model_dump()
+    values["job_date"] = _parse_date(source.job_date)
+    for field in _COMMISSION_IMPORT_JOB_FIELDS:
+        setattr(target, field, values[field])
+    hold_percent, hold_amount = calculate_job_hold(
+        profit_loss=source.profit_loss,
+        balance_amount=target.balance_amount,
+        payment_received_amount=target.payment_received_amount,
+    )
+    target.hold_bonus_percent = hold_percent
+    target.hold_bonus_amount = hold_amount
+
+
+def _append_source_filename(period: CommissionPeriod, source_filename: Optional[str]) -> None:
+    name = str(source_filename or "").strip()
+    if not name:
+        return
+    existing = [part.strip() for part in str(period.source_filename or "").split(";") if part.strip()]
+    if name not in existing:
+        period.source_filename = "; ".join([*existing, name])
+
+
+@router.post("/import/merge-preview")
+def preview_commission_import_merge(
+    payload: CommissionImportBatchIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    """Preview exact-period merges without changing database state."""
+    del current_user
+    previews = []
+    for item in payload.imports:
+        period = _exact_import_period(db, item)
+        if not period:
+            previews.append({
+                "source_filename": item.source_filename,
+                "period_id": None,
+                "period_label": item.period_label,
+                "new_jobs": len(item.jobs),
+                "automatic_updates": 0,
+                "manual_jobs": [],
+            })
+            continue
+
+        existing_by_job_no = {
+            normalize_receivable_job_no(job.job_no): job
+            for job in period.jobs
+            if normalize_receivable_job_no(job.job_no)
+        }
+        manual_jobs = []
+        new_jobs = 0
+        automatic_updates = 0
+        seen_ids: set[int] = set()
+        for incoming in item.jobs:
+            existing = existing_by_job_no.get(normalize_receivable_job_no(incoming.job_no))
+            if not existing:
+                new_jobs += 1
+                continue
+            reasons = _manual_job_edit_reasons(db, existing)
+            if reasons:
+                if existing.id not in seen_ids:
+                    manual_jobs.append({
+                        "job_id": existing.id,
+                        "job_no": existing.job_no,
+                        "sales_rep": existing.sales_rep,
+                        "reasons": reasons,
+                    })
+                    seen_ids.add(existing.id)
+            else:
+                automatic_updates += 1
+
+        previews.append({
+            "source_filename": item.source_filename,
+            "period_id": period.id,
+            "period_label": period.period_label,
+            "from_date": period.from_date.isoformat() if period.from_date else None,
+            "till_date": period.till_date.isoformat() if period.till_date else None,
+            "new_jobs": new_jobs,
+            "automatic_updates": automatic_updates,
+            "manual_jobs": manual_jobs,
+        })
+    return {"imports": previews}
+
+
+@router.post("/import/merge", status_code=status.HTTP_200_OK)
+def merge_commission_imports(
+    payload: CommissionImportMergeIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    """Merge multiple files into their exact existing periods by JOB NO.
+
+    New JOBs are inserted. Existing unmodified JOBs are refreshed from the
+    incoming file. Existing manually-reviewed JOBs are refreshed only when the
+    caller explicitly selects their immutable database IDs. Accounting fields,
+    attachments and wallet history are never deleted by this operation.
+    """
+    if not payload.imports:
+        raise HTTPException(status_code=400, detail="Danh sách file import đang trống.")
+    if len(payload.imports) > 50:
+        raise HTTPException(status_code=400, detail="Mỗi lần chỉ được import tối đa 50 file.")
+
+    selected_manual_ids = set(payload.overwrite_manual_job_ids)
+    period_ids: set[int] = set()
+    jobs_added = 0
+    jobs_updated = 0
+    manual_jobs_skipped = 0
+    files_merged = 0
+    files_created = 0
+
+    try:
+        for item in payload.imports:
+            period = _exact_import_period(db, item)
+            if not period:
+                period = _persist_commission_import(db, item, current_user)
+                db.flush()
+                period_ids.add(period.id)
+                jobs_added += len(item.jobs)
+                files_created += 1
+                continue
+
+            files_merged += 1
+            period_ids.add(period.id)
+            existing_by_job_no = {
+                normalize_receivable_job_no(job.job_no): job
+                for job in period.jobs
+                if normalize_receivable_job_no(job.job_no)
+            }
+            for incoming in item.jobs:
+                normalized_job_no = normalize_receivable_job_no(incoming.job_no)
+                existing = existing_by_job_no.get(normalized_job_no)
+                if not existing:
+                    new_job = CommissionJob(period_id=period.id, job_no=incoming.job_no)
+                    _apply_imported_job_fields(new_job, incoming)
+                    db.add(new_job)
+                    db.flush()
+                    existing_by_job_no[normalized_job_no] = new_job
+                    jobs_added += 1
+                    continue
+
+                reasons = _manual_job_edit_reasons(db, existing)
+                if reasons and existing.id not in selected_manual_ids:
+                    manual_jobs_skipped += 1
+                    continue
+                _apply_imported_job_fields(existing, incoming)
+                jobs_updated += 1
+
+            _append_source_filename(period, item.source_filename)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "period_ids": sorted(period_ids),
+        "files_merged": files_merged,
+        "files_created": files_created,
+        "jobs_added": jobs_added,
+        "jobs_updated": jobs_updated,
+        "manual_jobs_skipped": manual_jobs_skipped,
+        "message": (
+            f"Đã cập nhật {jobs_updated} JOB, thêm mới {jobs_added} JOB; "
+            f"giữ nguyên {manual_jobs_skipped} JOB đã sửa thủ công không được chọn."
+        ),
+    }
+
+
+@router.post("/import", status_code=status.HTTP_201_CREATED)
+def import_commission(
+    payload: CommissionImportIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    """Persist one user-confirmed Climax file."""
+    period = _persist_commission_import(db, payload, current_user)
     db.commit()
 
     return {
         "period_id": period.id,
         "period_label": period.period_label,
-        "jobs_saved": len(jobs_to_insert),
-        "message": f"✅ Đã lưu {len(jobs_to_insert)} jobs cho kỳ '{period.period_label}' vào cơ sở dữ liệu.",
+        "jobs_saved": len(payload.jobs),
+        "message": f"✅ Đã lưu {len(payload.jobs)} jobs cho kỳ '{period.period_label}' vào cơ sở dữ liệu.",
+    }
+
+
+@router.post("/import/batch", status_code=status.HTTP_201_CREATED)
+def import_commission_batch(
+    payload: CommissionImportBatchIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    """Persist several Climax files atomically.
+
+    Every file is validated and staged before the single commit.  A malformed
+    file therefore cannot leave a half-imported batch in the database.
+    """
+    if not payload.imports:
+        raise HTTPException(status_code=400, detail="Danh sách file import đang trống.")
+    if len(payload.imports) > 50:
+        raise HTTPException(status_code=400, detail="Mỗi lần chỉ được import tối đa 50 file.")
+
+    try:
+        periods = [
+            _persist_commission_import(db, item, current_user)
+            for item in payload.imports
+        ]
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    jobs_saved = sum(len(item.jobs) for item in payload.imports)
+    return {
+        "period_ids": [period.id for period in periods],
+        "files_saved": len(periods),
+        "jobs_saved": jobs_saved,
+        "message": f"✅ Đã lưu {len(periods)} file với tổng {jobs_saved} jobs vào cơ sở dữ liệu.",
     }
 
 
@@ -390,13 +721,17 @@ def list_periods(db: Session = Depends(get_db)):
     result = []
     for p in periods:
         period_str = p.from_date.strftime("%Y-%m") if p.from_date else "0000-00"
-        rep_map = defaultdict(lambda: {"job_count": 0, "total_realized_revenue": 0.0, "total_realized_cost": 0.0, "total_profit_loss": 0.0})
+        payout_periods = _source_payout_periods(p)
+        rep_map = defaultdict(lambda: {"job_count": 0, "total_realized_revenue": 0.0, "total_realized_cost": 0.0, "total_profit_loss": 0.0, "payment_received_total": 0.0, "hold_bonus_total": 0.0})
         for j in p.jobs:
             rep = j.sales_rep or "(Unknown)"
             rep_map[rep]["job_count"] += 1
             rep_map[rep]["total_realized_revenue"] += j.realized_revenue
             rep_map[rep]["total_realized_cost"] += j.realized_cost
             rep_map[rep]["total_profit_loss"] += j.profit_loss
+            if str(j.payment_received or "NO").strip().upper() == "YES":
+                rep_map[rep]["payment_received_total"] += max(0.0, float(j.payment_received_amount or 0.0))
+            rep_map[rep]["hold_bonus_total"] += max(0.0, float(j.hold_bonus_amount or 0.0))
 
         from app.models.commission import CommissionRepOverride
         overrides = db.query(CommissionRepOverride).filter(CommissionRepOverride.period_id == p.id).all()
@@ -426,18 +761,17 @@ def list_periods(db: Session = Depends(get_db)):
                 job_count = ov.override_job_count
 
             salary = float(emp_salary)
+            target_override = ov.override_target if ov and ov.override_target is not None else None
+            is_target_overridden = target_override is not None
             bonus_calc = calculate_employee_bonus(
                 total_profit_loss,
                 salary,
                 active_rules,
                 uses_progressive_bonus=uses_progressive_bonus,
+                target_override=target_override,
             )
 
             target = bonus_calc["target"]
-            is_target_overridden = False
-            if ov and ov.override_target is not None:
-                target = ov.override_target
-                is_target_overridden = True
 
             is_rate_overridden = False
             if ov and ov.override_bonus_rate is not None:
@@ -460,6 +794,21 @@ def list_periods(db: Session = Depends(get_db)):
             else:
                 sales_bonus = total_bonus_quarter / 3.0
 
+            # The target gate is absolute: stale/manual override values must
+            # never produce commission when Profit/Loss does not exceed Target.
+            if bonus_calc["pf_count_bn"] <= 0:
+                bonus_rate = 0.0
+                total_bonus_quarter = 0.0
+                sales_bonus = 0.0
+
+            from app.services.commission_wallet_rules import calculate_company_bonus_wallet
+            wallet_rule = calculate_company_bonus_wallet(
+                total_profit_loss=total_profit_loss,
+                total_bonus_quarter=total_bonus_quarter,
+                monthly_bonus=sales_bonus,
+                policy_hold_amount=data["hold_bonus_total"],
+            )
+
             rep_summary.append(
                 SalesRepSummaryOut(
                     sales_rep=rep,
@@ -471,8 +820,10 @@ def list_periods(db: Session = Depends(get_db)):
                     target=target,
                     bonus_rate=bonus_rate,
                     total_bonus_quarter=total_bonus_quarter,
+                    payment_received_total=round(data["payment_received_total"], 2),
+                    hold_bonus_total=float(wallet_rule["company_held_profit"]),
                     employee_salary=float(emp_salary),
-                    coefficient=bonus_calc["coefficient"],
+                    coefficient=float(bonus_calc["coefficient"] or 0.0),
                     is_pnl_overridden=is_pnl_overridden,
                     is_target_overridden=is_target_overridden,
                     is_rate_overridden=is_rate_overridden,
@@ -481,6 +832,13 @@ def list_periods(db: Session = Depends(get_db)):
                     remark=ov.remark if ov else "",
                     bonus_rules=active_rules,
                     uses_progressive_bonus=uses_progressive_bonus,
+                    monthly_payouts=[
+                        MonthlyCommissionPayoutOut(
+                            payout_period=payout_period,
+                            amount=round(float(wallet_rule["monthly_payout"]), 2),
+                        )
+                        for payout_period in payout_periods
+                    ],
                 )
             )
 
@@ -494,6 +852,7 @@ def list_periods(db: Session = Depends(get_db)):
                 job_count=len(p.jobs),
                 total_profit_loss=sum(j.profit_loss for j in p.jobs),
                 created_at=p.created_at.isoformat(),
+                payout_periods=payout_periods,
                 sales_rep_summary=rep_summary,
             )
         )
@@ -508,6 +867,7 @@ def get_period_detail(period_id: int, db: Session = Depends(get_db)):
     period = db.query(CommissionPeriod).filter(CommissionPeriod.id == period_id, CommissionPeriod.is_voided.is_(False)).first()
     if not period:
         raise HTTPException(status_code=404, detail="Kỳ commission không tồn tại.")
+    payout_periods = _source_payout_periods(period)
 
     # Tổng hợp theo sales_rep
     from collections import defaultdict
@@ -525,13 +885,16 @@ def get_period_detail(period_id: int, db: Session = Depends(get_db)):
                 "uses_progressive_bonus": is_sales_bonus_employee(emp),
             }
 
-    rep_map: dict = defaultdict(lambda: {"job_count": 0, "total_realized_revenue": 0.0, "total_realized_cost": 0.0, "total_profit_loss": 0.0})
+    rep_map: dict = defaultdict(lambda: {"job_count": 0, "total_realized_revenue": 0.0, "total_realized_cost": 0.0, "total_profit_loss": 0.0, "payment_received_total": 0.0, "hold_bonus_total": 0.0})
     for j in period.jobs:
         rep = j.sales_rep or "(Unknown)"
         rep_map[rep]["job_count"] += 1
         rep_map[rep]["total_realized_revenue"] += j.realized_revenue
         rep_map[rep]["total_realized_cost"] += j.realized_cost
         rep_map[rep]["total_profit_loss"] += j.profit_loss
+        if str(j.payment_received or "NO").strip().upper() == "YES":
+            rep_map[rep]["payment_received_total"] += max(0.0, float(j.payment_received_amount or 0.0))
+        rep_map[rep]["hold_bonus_total"] += max(0.0, float(j.hold_bonus_amount or 0.0))
 
     # Load overrides for this period
     from app.models.commission import CommissionRepOverride
@@ -574,21 +937,20 @@ def get_period_detail(period_id: int, db: Session = Depends(get_db)):
         if ov and ov.override_job_count is not None:
             job_count = ov.override_job_count
 
-        # SALE uses the existing progressive calculation; all other employees
-        # use the fixed 20% of 95% Profit calculation.
+        # SALE uses progressive tiers; all other employees use the fixed 20%
+        # rate. Both branches only reward Profit/Loss above Target.
         salary = float(emp_salary)
+        target_override = ov.override_target if ov and ov.override_target is not None else None
+        is_target_overridden = target_override is not None
         bonus_calc = calculate_employee_bonus(
             total_profit_loss,
             salary,
             active_rules,
             uses_progressive_bonus=uses_progressive_bonus,
+            target_override=target_override,
         )
         
         target = bonus_calc["target"]
-        is_target_overridden = False
-        if ov and ov.override_target is not None:
-            target = ov.override_target
-            is_target_overridden = True
 
         is_rate_overridden = False
         if ov and ov.override_bonus_rate is not None:
@@ -611,6 +973,21 @@ def get_period_detail(period_id: int, db: Session = Depends(get_db)):
         else:
             sales_bonus = total_bonus_quarter / 3.0
 
+        # The target gate is absolute: stale/manual override values must never
+        # produce commission when Profit/Loss does not exceed Target.
+        if bonus_calc["pf_count_bn"] <= 0:
+            bonus_rate = 0.0
+            total_bonus_quarter = 0.0
+            sales_bonus = 0.0
+
+        from app.services.commission_wallet_rules import calculate_company_bonus_wallet
+        wallet_rule = calculate_company_bonus_wallet(
+            total_profit_loss=total_profit_loss,
+            total_bonus_quarter=total_bonus_quarter,
+            monthly_bonus=sales_bonus,
+            policy_hold_amount=data["hold_bonus_total"],
+        )
+
         summary.append(
             SalesRepSummaryOut(
                 sales_rep=rep,
@@ -622,8 +999,10 @@ def get_period_detail(period_id: int, db: Session = Depends(get_db)):
                 target=target,
                 bonus_rate=bonus_rate,
                 total_bonus_quarter=total_bonus_quarter,
+                payment_received_total=round(data["payment_received_total"], 2),
+                hold_bonus_total=float(wallet_rule["company_held_profit"]),
                 employee_salary=float(emp_salary),
-                coefficient=bonus_calc["coefficient"],
+                coefficient=float(bonus_calc["coefficient"] or 0.0),
                 is_pnl_overridden=is_pnl_overridden,
                 is_target_overridden=is_target_overridden,
                 is_rate_overridden=is_rate_overridden,
@@ -632,6 +1011,13 @@ def get_period_detail(period_id: int, db: Session = Depends(get_db)):
                 remark=ov.remark if ov else "",
                 bonus_rules=active_rules,
                 uses_progressive_bonus=uses_progressive_bonus,
+                monthly_payouts=[
+                    MonthlyCommissionPayoutOut(
+                        payout_period=payout_period,
+                        amount=round(float(wallet_rule["monthly_payout"]), 2),
+                    )
+                    for payout_period in payout_periods
+                ],
             )
         )
 
@@ -645,6 +1031,7 @@ def get_period_detail(period_id: int, db: Session = Depends(get_db)):
         total_profit_loss=sum(j.profit_loss for j in period.jobs),
         created_at=period.created_at.isoformat(),
         created_by=period.created_by,
+        payout_periods=payout_periods,
         sales_rep_summary=summary,
     )
 
@@ -674,7 +1061,180 @@ class JobRowOut(BaseModel):
     profitLoss: float = 0.0
     containerPicked: Optional[str] = None
     paymentReceived: Optional[str] = None
+    receivableAmount: Optional[float] = None
+    balanceAmount: Optional[float] = None
+    paymentReceivedAmount: Optional[float] = None
     bonusRemark: Optional[str] = None
+    holdBonusPercent: Optional[float] = None
+    holdBonusAmount: Optional[float] = None
+    netBonus: float = 0.0
+    receivableCount: int = 0
+
+
+class CommissionReceivableAttachmentOut(BaseModel):
+    id: int
+    period_id: int
+    job_id: int
+    job_no: str
+    sales_rep: Optional[str] = None
+    original_filename: str
+    content_type: Optional[str] = None
+    size_bytes: int
+    note: Optional[str] = None
+    uploaded_by: Optional[str] = None
+    created_at: str
+
+
+class CommissionReceivableReconciliationJobOut(BaseModel):
+    job_id: int
+    job_no: str
+    source_rows: int
+    receivable_amount: float
+    payment_received_amount: float
+    balance_amount: float
+    paid_percent: float
+    hold_bonus_percent: float
+    hold_bonus_amount: float
+    net_bonus: float
+
+
+class CommissionReceivableReconciliationOut(BaseModel):
+    original_filename: str
+    sheet_name: str
+    positive_rows: int
+    ignored_non_positive_rows: int
+    invalid_positive_rows: int
+    matched_jobs: int
+    unmatched_positive_jobs: int
+    unmatched_job_nos: List[str]
+    attachment: CommissionReceivableAttachmentOut
+    updates: List[CommissionReceivableReconciliationJobOut]
+
+
+def _reconcile_job_hold_ledger(
+    db: Session,
+    job: CommissionJob,
+    target_hold_amount: float,
+    *,
+    reason_code: str,
+    note: str,
+    created_by: Optional[str] = None,
+) -> float:
+    """Move one JOB's automatic wallet hold to the reviewed Hold Bonus value."""
+    entries = db.query(CommissionWalletLedger).filter(
+        CommissionWalletLedger.period_id == job.period_id,
+        CommissionWalletLedger.job_id == job.id,
+    ).order_by(CommissionWalletLedger.id).all()
+    position = _wallet_positions(entries).get((job.sales_rep or "(Unknown)", job.id), {})
+    current_hold = round(float(position.get("payment_held", 0.0)), 2)
+    hold_delta = round(max(0.0, float(target_hold_amount or 0.0)) - current_hold, 2)
+    if abs(hold_delta) < 0.01:
+        return 0.0
+
+    source = entries[0] if entries else None
+    db.add(CommissionWalletLedger(
+        period_id=job.period_id,
+        job_id=job.id,
+        entitlement_id=source.entitlement_id if source else None,
+        sales_rep=job.sales_rep or "(Unknown)",
+        employee_id=(source.employee_id if source else _employee_id_for_sales_rep(job.sales_rep or "(Unknown)", db)),
+        entry_type="PAYMENT_STATUS_HOLD" if hold_delta > 0 else "RELEASED",
+        amount=abs(hold_delta),
+        reason_code=reason_code,
+        note=note,
+        created_by=created_by,
+    ))
+    return hold_delta
+
+
+def _apply_fixed_job_hold(
+    db: Session,
+    job: CommissionJob,
+    *,
+    reason_code: str,
+    note: str,
+    created_by: Optional[str] = None,
+    wallet_hold_amount: Optional[float] = None,
+) -> float:
+    """Persist the JOB policy hold and align the bonus-wallet hold separately."""
+    from app.services.commission_wallet_rules import calculate_job_hold
+
+    hold_percent, fixed_amount = calculate_job_hold(
+        profit_loss=job.profit_loss,
+        balance_amount=job.balance_amount,
+        payment_received_amount=job.payment_received_amount,
+    )
+    job.hold_bonus_percent = hold_percent
+    job.hold_bonus_amount = fixed_amount
+
+    # Once accounting has released a hold into a payment workflow, a later
+    # formula sync must not recreate it. The saved JOB fields still retain the
+    # original fixed hold for audit and summary display.
+    entries = db.query(CommissionWalletLedger).filter(
+        CommissionWalletLedger.period_id == job.period_id,
+        CommissionWalletLedger.job_id == job.id,
+    ).order_by(CommissionWalletLedger.id).all()
+    explicit_release_exists = any(
+        entry.entry_type == "RELEASED" and entry.reason_code in {
+            "PAYMENT_RECEIVED",
+            "ACCOUNTING_PAYMENT_COMMAND",
+            "PAYMENT_RECEIVED_RECONCILE",
+        }
+        for entry in entries
+    )
+    if explicit_release_exists:
+        return 0.0
+    return _reconcile_job_hold_ledger(
+        db,
+        job,
+        fixed_amount if wallet_hold_amount is None else max(0.0, float(wallet_hold_amount)),
+        reason_code=reason_code,
+        note=note,
+        created_by=created_by,
+    )
+
+
+def _receivable_attachment_out(
+    attachment: CommissionJobReceivableAttachment,
+    job: CommissionJob,
+) -> CommissionReceivableAttachmentOut:
+    return CommissionReceivableAttachmentOut(
+        id=attachment.id,
+        period_id=attachment.period_id,
+        job_id=job.id,
+        job_no=job.job_no,
+        sales_rep=job.sales_rep,
+        original_filename=attachment.original_filename,
+        content_type=attachment.content_type,
+        size_bytes=attachment.size_bytes,
+        note=attachment.note,
+        uploaded_by=attachment.uploaded_by,
+        created_at=attachment.created_at.isoformat(),
+    )
+
+
+def _commission_job_or_404(db: Session, period_id: int, job_id: int) -> CommissionJob:
+    job = db.query(CommissionJob).filter(
+        CommissionJob.id == job_id,
+        CommissionJob.period_id == period_id,
+    ).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy JOB trong kỳ commission.")
+    return job
+
+
+def _receivable_file_path(stored_filename: str) -> Path:
+    if Path(stored_filename).name != stored_filename:
+        raise HTTPException(status_code=404, detail="Tệp công nợ không hợp lệ.")
+    candidate = (COMMISSION_RECEIVABLE_UPLOAD_DIR / stored_filename).resolve()
+    try:
+        if not candidate.is_relative_to(COMMISSION_RECEIVABLE_UPLOAD_DIR.resolve()):
+            raise HTTPException(status_code=404, detail="Tệp công nợ không hợp lệ.")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Tệp công nợ không hợp lệ.") from exc
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy tệp công nợ trên máy chủ.")
+    return candidate
 
 
 @router.get("/periods/{period_id}/jobs", response_model=List[JobRowOut])
@@ -688,6 +1248,27 @@ def get_period_jobs(
         query = query.filter(CommissionJob.sales_rep == sales_rep)
     
     jobs = query.order_by(CommissionJob.id.asc()).all()
+    ledger_entries = db.query(CommissionWalletLedger).filter(
+        CommissionWalletLedger.period_id == period_id,
+        CommissionWalletLedger.job_id.in_([job.id for job in jobs]),
+    ).all() if jobs else []
+    positions = _wallet_positions(ledger_entries)
+    period = db.query(CommissionPeriod).filter(CommissionPeriod.id == period_id).first()
+    fallback_earned_by_job = {
+        allocated_job.id: float(amount)
+        for allocated_job, _allocation_rep, amount, _is_paid in _period_wallet_allocations(period, db)
+        if allocated_job is not None
+    } if period else {}
+    receivable_counts = {
+        int(job_id): int(count)
+        for job_id, count in db.query(
+            CommissionJobReceivableLink.job_id,
+            func.count(CommissionJobReceivableLink.id),
+        ).filter(
+            CommissionJobReceivableLink.period_id == period_id,
+            CommissionJobReceivableLink.job_id.in_([job.id for job in jobs]),
+        ).group_by(CommissionJobReceivableLink.job_id).all()
+    } if jobs else {}
     result = []
     for j in jobs:
         result.append(
@@ -716,10 +1297,743 @@ def get_period_jobs(
                 profitLoss=j.profit_loss,
                 containerPicked=j.container_picked,
                 paymentReceived=j.payment_received,
+                receivableAmount=j.receivable_amount,
+                balanceAmount=j.balance_amount,
+                paymentReceivedAmount=j.payment_received_amount,
                 bonusRemark=j.bonus_remark,
+                holdBonusPercent=j.hold_bonus_percent,
+                holdBonusAmount=j.hold_bonus_amount,
+                netBonus=max(0.0, float(
+                    positions.get((j.sales_rep or "(Unknown)", j.id), {}).get(
+                        "earned",
+                        fallback_earned_by_job.get(j.id, 0.0),
+                    )
+                )),
+                receivableCount=receivable_counts.get(j.id, 0),
             )
         )
     return result
+
+
+@router.get(
+    "/periods/{period_id}/jobs/{job_id}/receivables",
+    response_model=List[CommissionReceivableAttachmentOut],
+)
+def list_job_receivables(
+    period_id: int,
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    job = _commission_job_or_404(db, period_id, job_id)
+    attachments = db.query(CommissionJobReceivableAttachment).join(
+        CommissionJobReceivableLink,
+        CommissionJobReceivableLink.attachment_id == CommissionJobReceivableAttachment.id,
+    ).filter(
+        CommissionJobReceivableLink.period_id == period_id,
+        CommissionJobReceivableLink.job_id == job_id,
+    ).order_by(CommissionJobReceivableAttachment.created_at.desc(), CommissionJobReceivableAttachment.id.desc()).all()
+    return [_receivable_attachment_out(item, job) for item in attachments]
+
+
+@router.post(
+    "/periods/{period_id}/jobs/{job_id}/receivables",
+    response_model=List[CommissionReceivableAttachmentOut],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_job_receivables(
+    period_id: int,
+    job_id: int,
+    files: List[UploadFile] = File(...),
+    note: str = Form(default=""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    job = _commission_job_or_404(db, period_id, job_id)
+    return await _upload_receivables_for_jobs(files, note, period_id, [job], db, current_user)
+
+
+@router.post(
+    "/periods/{period_id}/receivables/bulk",
+    response_model=List[CommissionReceivableAttachmentOut],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_bulk_job_receivables(
+    period_id: int,
+    job_ids: str = Form(...),
+    files: List[UploadFile] = File(...),
+    note: str = Form(default=""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    try:
+        parsed_job_ids = json.loads(job_ids)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Danh sách JOB được chọn không hợp lệ.") from exc
+    if not isinstance(parsed_job_ids, list):
+        raise HTTPException(status_code=422, detail="Danh sách JOB được chọn không hợp lệ.")
+    try:
+        unique_job_ids = list(dict.fromkeys(int(value) for value in parsed_job_ids))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Danh sách JOB được chọn không hợp lệ.") from exc
+    if not unique_job_ids or len(unique_job_ids) > 500:
+        raise HTTPException(status_code=422, detail="Hãy chọn từ 1 đến 500 JOB cho mỗi lần upload.")
+    jobs = db.query(CommissionJob).filter(
+        CommissionJob.period_id == period_id,
+        CommissionJob.id.in_(unique_job_ids),
+    ).all()
+    jobs_by_id = {job.id: job for job in jobs}
+    if len(jobs_by_id) != len(unique_job_ids):
+        raise HTTPException(status_code=404, detail="Có JOB được chọn không tồn tại trong kỳ commission.")
+    ordered_jobs = [jobs_by_id[job_id] for job_id in unique_job_ids]
+    sales_reps = {str(job.sales_rep or "").strip() for job in ordered_jobs}
+    if len(sales_reps) > 1:
+        raise HTTPException(status_code=422, detail="Các JOB trong một lần upload phải thuộc cùng một SALE.")
+    return await _upload_receivables_for_jobs(files, note, period_id, ordered_jobs, db, current_user)
+
+
+@router.post(
+    "/periods/{period_id}/receivables/reconcile",
+    response_model=CommissionReceivableReconciliationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def reconcile_job_receivables(
+    period_id: int,
+    job_ids: str = Form(...),
+    file: UploadFile = File(...),
+    note: str = Form(default=""),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    """Match an AGEING workbook to one SALE's JOBs and calculate Hold Bonus."""
+    try:
+        parsed_job_ids = json.loads(job_ids)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Danh sách JOB dùng để đối chiếu không hợp lệ.") from exc
+    if not isinstance(parsed_job_ids, list):
+        raise HTTPException(status_code=422, detail="Danh sách JOB dùng để đối chiếu không hợp lệ.")
+    try:
+        unique_job_ids = list(dict.fromkeys(int(value) for value in parsed_job_ids))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Danh sách JOB dùng để đối chiếu không hợp lệ.") from exc
+    if not unique_job_ids or len(unique_job_ids) > 500:
+        raise HTTPException(status_code=422, detail="Hãy đối chiếu từ 1 đến 500 JOB trong cùng một lần.")
+
+    jobs = db.query(CommissionJob).filter(
+        CommissionJob.period_id == period_id,
+        CommissionJob.id.in_(unique_job_ids),
+    ).all()
+    jobs_by_id = {job.id: job for job in jobs}
+    if len(jobs_by_id) != len(unique_job_ids):
+        raise HTTPException(status_code=404, detail="Có JOB dùng để đối chiếu không tồn tại trong kỳ commission.")
+    ordered_jobs = [jobs_by_id[job_id] for job_id in unique_job_ids]
+    sales_reps = {str(job.sales_rep or "").strip() for job in ordered_jobs}
+    if len(sales_reps) != 1:
+        raise HTTPException(status_code=422, detail="Mỗi file công nợ chỉ được đối chiếu với JOB của cùng một SALE.")
+    sales_rep = next(iter(sales_reps))
+    _ensure_bonus_editable(db, period_id, sales_rep or "(Unknown)")
+
+    original_name = Path(file.filename or "").name
+    if Path(original_name).suffix.lower() != ".xlsx":
+        raise HTTPException(status_code=422, detail="File tự động đối chiếu công nợ phải có định dạng .xlsx.")
+    contents = await file.read(COMMISSION_RECEIVABLE_MAX_FILE_SIZE + 1)
+    if not contents:
+        raise HTTPException(status_code=422, detail="File công nợ đang trống.")
+    if len(contents) > COMMISSION_RECEIVABLE_MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File công nợ vượt quá 15 MB.")
+    clean_note = note.strip()
+    if len(clean_note) > 2000:
+        raise HTTPException(status_code=422, detail="Ghi chú công nợ không được vượt quá 2.000 ký tự.")
+    try:
+        parsed = parse_receivable_workbook(contents, original_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    candidates_by_job_no: dict[str, list[CommissionJob]] = {}
+    for job in ordered_jobs:
+        candidates_by_job_no.setdefault(normalize_receivable_job_no(job.job_no), []).append(job)
+    matches: list[tuple[CommissionJob, ReceivableJobBalance]] = []
+    unmatched_job_nos: list[str] = []
+    for report_job in parsed.jobs:
+        candidates = candidates_by_job_no.get(report_job.job_no, [])
+        if len(candidates) != 1:
+            unmatched_job_nos.append(report_job.job_no)
+            continue
+        matches.append((candidates[0], report_job))
+    if not matches:
+        raise HTTPException(
+            status_code=422,
+            detail="Không có JOB Balance bằng 0 hoặc dương nào trong file khớp với danh sách JOB của SALE đang xem.",
+        )
+
+    matched_job_ids = [job.id for job, _report_job in matches]
+    ledger_entries = db.query(CommissionWalletLedger).filter(
+        CommissionWalletLedger.period_id == period_id,
+        CommissionWalletLedger.job_id.in_(matched_job_ids),
+    ).all()
+    positions = _wallet_positions(ledger_entries)
+    period = db.query(CommissionPeriod).filter(CommissionPeriod.id == period_id).first()
+    fallback_earned_by_job = {
+        allocated_job.id: float(amount)
+        for allocated_job, allocation_rep, amount, _is_paid in _period_wallet_allocations(period, db)
+        if allocated_job is not None and allocation_rep == sales_rep
+    } if period else {}
+    uploaded_by = getattr(current_user, "username", None) or str(getattr(current_user, "id", ""))
+    paid_amount_by_job: dict[int, float] = {}
+    for job, report_job in matches:
+        paid_amount = round(
+            report_job.received_amount
+            if report_job.received_amount > 0
+            else max(0.0, report_job.receivable_amount - report_job.balance_amount),
+            2,
+        )
+        job.receivable_amount = report_job.receivable_amount
+        job.balance_amount = report_job.balance_amount
+        job.payment_received_amount = paid_amount
+        job.payment_received = "YES"
+        paid_amount_by_job[job.id] = paid_amount
+    db.flush()
+    wallet_hold_targets = _period_wallet_hold_targets(period, db) if period else {}
+
+    updates: list[CommissionReceivableReconciliationJobOut] = []
+    for job, report_job in matches:
+        from app.services.commission_wallet_rules import calculate_job_hold
+
+        position = positions.get((job.sales_rep or "(Unknown)", job.id))
+        net_bonus = max(0.0, float(
+            position.get("earned", 0.0)
+            if position is not None
+            else fallback_earned_by_job.get(job.id, 0.0)
+        ))
+        hold_percent, hold_amount = calculate_job_hold(
+            profit_loss=job.profit_loss,
+            balance_amount=report_job.balance_amount,
+            payment_received_amount=paid_amount_by_job[job.id],
+        )
+        paid_amount = paid_amount_by_job[job.id]
+        _apply_fixed_job_hold(
+            db,
+            job,
+            reason_code="RECEIVABLE_RECONCILIATION",
+            note=(
+                f"Đối chiếu AGEING: Balance = {report_job.balance_amount:,.2f}; "
+                f"Hold JOB = {hold_amount:,.2f}; khách đã trả {paid_amount:,.2f}."
+            ),
+            created_by=uploaded_by or None,
+            wallet_hold_amount=wallet_hold_targets.get(job.id, min(net_bonus, hold_amount)),
+        )
+        updates.append(CommissionReceivableReconciliationJobOut(
+            job_id=job.id,
+            job_no=job.job_no,
+            source_rows=report_job.source_rows,
+            receivable_amount=report_job.receivable_amount,
+            payment_received_amount=paid_amount,
+            balance_amount=report_job.balance_amount,
+            paid_percent=round(report_job.paid_percent, 4),
+            hold_bonus_percent=hold_percent,
+            hold_bonus_amount=hold_amount,
+            net_bonus=round(net_bonus, 2),
+        ))
+
+    stored_name = f"reconcile_{matches[0][0].id}_{uuid4().hex}.xlsx"
+    COMMISSION_RECEIVABLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stored_path = COMMISSION_RECEIVABLE_UPLOAD_DIR / stored_name
+    attachment = CommissionJobReceivableAttachment(
+        period_id=period_id,
+        job_id=matches[0][0].id,
+        original_filename=original_name,
+        stored_filename=stored_name,
+        content_type=file.content_type or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        size_bytes=len(contents),
+        note=clean_note or None,
+        uploaded_by=uploaded_by or None,
+    )
+    try:
+        stored_path.write_bytes(contents)
+        db.add(attachment)
+        db.flush()
+        for job, _report_job in matches:
+            db.add(CommissionJobReceivableLink(
+                period_id=period_id,
+                job_id=job.id,
+                attachment_id=attachment.id,
+            ))
+        db.commit()
+        db.refresh(attachment)
+    except Exception:
+        db.rollback()
+        stored_path.unlink(missing_ok=True)
+        raise
+
+    return CommissionReceivableReconciliationOut(
+        original_filename=original_name,
+        sheet_name=parsed.sheet_name,
+        positive_rows=parsed.positive_rows,
+        ignored_non_positive_rows=parsed.ignored_non_positive_rows,
+        invalid_positive_rows=parsed.invalid_positive_rows,
+        matched_jobs=len(updates),
+        unmatched_positive_jobs=len(unmatched_job_nos),
+        unmatched_job_nos=unmatched_job_nos[:100],
+        attachment=_receivable_attachment_out(attachment, matches[0][0]),
+        updates=updates,
+    )
+
+
+async def _upload_receivables_for_jobs(
+    files: List[UploadFile],
+    note: str,
+    period_id: int,
+    jobs: list[CommissionJob],
+    db: Session,
+    current_user,
+) -> list[CommissionReceivableAttachmentOut]:
+    if not files or len(files) > COMMISSION_RECEIVABLE_MAX_FILES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Mỗi lần chỉ được tải từ 1 đến {COMMISSION_RECEIVABLE_MAX_FILES} tệp công nợ.",
+        )
+    clean_note = note.strip()
+    if len(clean_note) > 2000:
+        raise HTTPException(status_code=422, detail="Ghi chú công nợ không được vượt quá 2.000 ký tự.")
+
+    prepared: list[tuple[str, str, str, bytes]] = []
+    for upload in files:
+        original_name = Path(upload.filename or "").name
+        suffix = Path(original_name).suffix.lower()
+        if not original_name or suffix not in COMMISSION_RECEIVABLE_ALLOWED_EXTENSIONS:
+            allowed = ", ".join(sorted(COMMISSION_RECEIVABLE_ALLOWED_EXTENSIONS))
+            raise HTTPException(status_code=422, detail=f"Định dạng tệp công nợ không được hỗ trợ. Cho phép: {allowed}")
+        contents = await upload.read(COMMISSION_RECEIVABLE_MAX_FILE_SIZE + 1)
+        if not contents:
+            raise HTTPException(status_code=422, detail=f"Tệp {original_name} đang trống.")
+        if len(contents) > COMMISSION_RECEIVABLE_MAX_FILE_SIZE:
+            raise HTTPException(status_code=413, detail=f"Tệp {original_name} vượt quá 15 MB.")
+        stored_name = f"jobs_{jobs[0].id}_{uuid4().hex}{suffix}"
+        prepared.append((original_name, stored_name, upload.content_type or "application/octet-stream", contents))
+
+    COMMISSION_RECEIVABLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    written_paths: list[Path] = []
+    created: list[CommissionJobReceivableAttachment] = []
+    uploaded_by = getattr(current_user, "username", None) or str(getattr(current_user, "id", ""))
+    try:
+        for original_name, stored_name, content_type, contents in prepared:
+            path = COMMISSION_RECEIVABLE_UPLOAD_DIR / stored_name
+            path.write_bytes(contents)
+            written_paths.append(path)
+            attachment = CommissionJobReceivableAttachment(
+                period_id=period_id,
+                job_id=jobs[0].id,
+                original_filename=original_name,
+                stored_filename=stored_name,
+                content_type=content_type,
+                size_bytes=len(contents),
+                note=clean_note or None,
+                uploaded_by=uploaded_by or None,
+            )
+            db.add(attachment)
+            db.flush()
+            for job in jobs:
+                db.add(CommissionJobReceivableLink(
+                    period_id=period_id,
+                    job_id=job.id,
+                    attachment_id=attachment.id,
+                ))
+            created.append(attachment)
+        db.commit()
+        for attachment in created:
+            db.refresh(attachment)
+    except Exception:
+        db.rollback()
+        for path in written_paths:
+            path.unlink(missing_ok=True)
+        raise
+    return [_receivable_attachment_out(item, jobs[0]) for item in created]
+
+
+@router.get("/periods/{period_id}/jobs/{job_id}/receivables/{attachment_id}/file")
+def download_job_receivable(
+    period_id: int,
+    job_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+):
+    _commission_job_or_404(db, period_id, job_id)
+    attachment = db.query(CommissionJobReceivableAttachment).join(
+        CommissionJobReceivableLink,
+        CommissionJobReceivableLink.attachment_id == CommissionJobReceivableAttachment.id,
+    ).filter(
+        CommissionJobReceivableAttachment.id == attachment_id,
+        CommissionJobReceivableLink.period_id == period_id,
+        CommissionJobReceivableLink.job_id == job_id,
+    ).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ công nợ.")
+    path = _receivable_file_path(attachment.stored_filename)
+    return FileResponse(
+        path=path,
+        media_type=attachment.content_type or "application/octet-stream",
+        filename=attachment.original_filename,
+    )
+
+
+@router.delete(
+    "/periods/{period_id}/jobs/{job_id}/receivables/{attachment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_job_receivable(
+    period_id: int,
+    job_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+):
+    _commission_job_or_404(db, period_id, job_id)
+    attachment = db.query(CommissionJobReceivableAttachment).join(
+        CommissionJobReceivableLink,
+        CommissionJobReceivableLink.attachment_id == CommissionJobReceivableAttachment.id,
+    ).filter(
+        CommissionJobReceivableAttachment.id == attachment_id,
+        CommissionJobReceivableLink.period_id == period_id,
+        CommissionJobReceivableLink.job_id == job_id,
+    ).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ công nợ.")
+    try:
+        file_path = _receivable_file_path(attachment.stored_filename)
+    except HTTPException:
+        file_path = None
+    link = db.query(CommissionJobReceivableLink).filter(
+        CommissionJobReceivableLink.attachment_id == attachment_id,
+        CommissionJobReceivableLink.job_id == job_id,
+        CommissionJobReceivableLink.period_id == period_id,
+    ).first()
+    if not link:
+        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ công nợ.")
+    db.delete(link)
+    db.flush()
+    has_other_links = db.query(CommissionJobReceivableLink.id).filter(
+        CommissionJobReceivableLink.attachment_id == attachment_id,
+    ).first() is not None
+    if not has_other_links:
+        db.delete(attachment)
+    db.commit()
+    if file_path and not has_other_links:
+        file_path.unlink(missing_ok=True)
+    return None
+
+
+@router.patch("/periods/{period_id}/jobs/{job_id}/hold-bonus")
+def update_job_hold_bonus(
+    period_id: int,
+    job_id: int,
+    payload: CommissionJobHoldBonusIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    """Hold Bonus is policy-derived and cannot be edited manually."""
+    _commission_job_or_404(db, period_id, job_id)
+    raise HTTPException(
+        status_code=409,
+        detail="Hold Bonus được cố định ở mức 30% Bonus ròng và không được phép chỉnh sửa thủ công.",
+    )
+
+
+@router.patch("/periods/{period_id}/jobs/{job_id}/manual-payment")
+def manually_update_job_payment_received(
+    period_id: int,
+    job_id: int,
+    payload: CommissionJobManualPaymentIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    """Correct Payment Received directly from the administrator JOB editor.
+
+    This is intentionally separate from ``/payment``: the latter is the Sales
+    report/accounting-verification workflow.  The administrator editor updates
+    the receivable snapshot immediately, then reconciles the fixed JOB hold and
+    bonus wallet so every summary can be refreshed without a page reload.
+    """
+    job = db.query(CommissionJob).filter(
+        CommissionJob.id == job_id,
+        CommissionJob.period_id == period_id,
+    ).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy JOB trong kỳ commission.")
+    _ensure_bonus_editable(db, period_id, job.sales_rep or "(Unknown)")
+
+    normalized = payload.payment_received.strip().upper()
+    paid_amount = round(float(payload.payment_received_amount or 0.0), 2)
+    if normalized == "YES" and paid_amount <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Khi chọn YES, vui lòng nhập số tiền khách hàng đã trả lớn hơn 0.",
+        )
+    if normalized == "NO":
+        paid_amount = 0.0
+
+    previous_status = str(job.payment_received or "NO").strip().upper()
+    previous_amount = round(float(job.payment_received_amount or 0.0), 2)
+    profit_loss = round(float(job.profit_loss or 0.0), 2)
+    actor = _actor_name(current_user)
+    period = db.get(CommissionPeriod, period_id)
+    customer_payment_months = _source_payout_periods(period) if period else []
+    normal_payout_months = _next_commission_payout_periods(period) if period else []
+    source_entries = db.query(CommissionWalletLedger).filter(
+        CommissionWalletLedger.period_id == period_id,
+        CommissionWalletLedger.job_id == job.id,
+        CommissionWalletLedger.sales_rep == (job.sales_rep or "(Unknown)"),
+    ).order_by(CommissionWalletLedger.id.asc()).all()
+    position_before = _wallet_positions(source_entries).get((job.sales_rep or "(Unknown)", job.id), {})
+    held_before = round(float(position_before.get("payment_held", 0.0)), 2)
+    from app.services.commission_wallet_rules import calculate_job_hold
+
+    previous_hold_amount = calculate_job_hold(
+        profit_loss=job.profit_loss,
+        balance_amount=job.balance_amount,
+        payment_received_amount=job.payment_received_amount,
+    )[1]
+    is_fully_paid = normalized == "YES" and paid_amount >= max(0.0, profit_loss) - 0.005
+    status_changed_to_yes = previous_status == "NO" and normalized == "YES"
+    unlocks_existing_hold = is_fully_paid and previous_hold_amount > 0.005
+    requires_payment_month = status_changed_to_yes or unlocks_existing_hold
+    selected_payout_months: list[str] = []
+    if requires_payment_month:
+        if len(customer_payment_months) != 3 or len(normal_payout_months) != 3:
+            raise HTTPException(status_code=422, detail="Không xác định được ba tháng của kỳ Commission và kỳ chi trả.")
+        middle_payment_month = customer_payment_months[1]
+        if payload.payment_month != middle_payment_month:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Tháng khách hàng thanh toán phải là tháng giữa của kỳ Commission "
+                    f"({middle_payment_month})."
+                ),
+            )
+        if not payload.payment_date or payload.payment_date.strftime("%Y-%m") != middle_payment_month:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Hãy chọn ngày khách hàng thanh toán thuộc tháng {middle_payment_month}.",
+            )
+        if is_fully_paid and payload.payment_month:
+            payment_index = customer_payment_months.index(payload.payment_month)
+            payout_start_index = (
+                max(0, payment_index - 1)
+                if payload.payment_date.day <= 25
+                else payment_index
+            )
+            payout_candidates = normal_payout_months[payout_start_index:]
+            requested_payout_months = [
+                str(month or "").strip()
+                for month in (payload.payout_months or [])
+                if str(month or "").strip()
+            ]
+            requested_set = set(requested_payout_months)
+            if (
+                not requested_payout_months
+                or len(requested_set) != len(requested_payout_months)
+                or not requested_set.issubset(set(payout_candidates))
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Hãy chọn tháng chi hợp lệ: tháng chi đầu tiên chỉ khả dụng khi "
+                        "khách thanh toán chậm nhất ngày 25; các tháng còn lại luôn khả dụng."
+                    ),
+                )
+            selected_payout_months = [
+                month for month in payout_candidates if month in requested_set
+            ]
+
+    job.payment_received = normalized
+    job.payment_received_amount = paid_amount
+    # A manual correction becomes the current receivable evidence.  Keeping
+    # Balance as P/L minus the entered payment preserves the company rule:
+    # partial payment remains Hold 30%, full payment removes the hold, and an
+    # overpayment produces a negative Balance that is ignored.
+    job.receivable_amount = max(0.0, profit_loss)
+    job.balance_amount = round(profit_loss - paid_amount, 2) if normalized == "YES" else max(0.0, profit_loss)
+    if requires_payment_month and payload.payment_month:
+        # Keep the confirmed customer-payment month even for a partial payment.
+        # If the administrator later raises the paid amount to fully paid, the
+        # editor can reuse this month as the default split point.
+        job.held_release_payout_period = payload.payment_month
+    default_remark = (
+        f"Quản trị viên chỉnh Payment Received {previous_status} → {normalized}; "
+        f"đã trả {paid_amount:,.2f}"
+        f"{f'; ngày khách thanh toán {payload.payment_date.isoformat()}' if payload.payment_date else ''}."
+    )
+    job.bonus_remark = payload.remark.strip() if payload.remark and payload.remark.strip() else default_remark
+    db.flush()
+
+    # Recalculate formula entitlements and all period-level wallet targets
+    # before enforcing this JOB's authoritative manual status.
+    sync_result = sync_commission_wallet(CommissionWalletSyncIn(period_id=period_id), db, current_user)
+    db.refresh(job)
+    period = db.get(CommissionPeriod, period_id)
+    wallet_hold_targets = _period_wallet_hold_targets(period, db) if period else {}
+
+    hold_percent, hold_amount = calculate_job_hold(
+        profit_loss=job.profit_loss,
+        balance_amount=job.balance_amount,
+        payment_received_amount=job.payment_received_amount,
+    )
+    job.hold_bonus_percent = hold_percent
+    job.hold_bonus_amount = hold_amount
+    wallet_hold_delta = _reconcile_job_hold_ledger(
+        db,
+        job,
+        wallet_hold_targets.get(job.id, 0.0),
+        reason_code="MANUAL_PAYMENT_OVERRIDE",
+        note=(
+            f"Chỉnh tay Payment Received {previous_status} → {normalized}; "
+            f"số tiền đã trả {paid_amount:,.2f}; Hold JOB {hold_amount:,.2f}."
+        ),
+        created_by=actor,
+    )
+    release_allocations: list[dict] = []
+    schedule_ids: list[int] = []
+    if is_fully_paid and held_before >= 0.005 and payload.payment_month:
+        if not selected_payout_months:
+            raise HTTPException(status_code=422, detail="Chưa chọn tháng chi bonus đang giữ.")
+        remaining_amount = round(held_before, 2)
+        allocation_count = len(selected_payout_months)
+        for index, payout_month in enumerate(selected_payout_months):
+            allocation_amount = (
+                round(remaining_amount, 2)
+                if index == allocation_count - 1
+                else round(held_before / allocation_count, 2)
+            )
+            remaining_amount = round(remaining_amount - allocation_amount, 2)
+            release_allocations.append({
+                "payout_period": payout_month,
+                "amount": allocation_amount,
+            })
+
+        source = source_entries[0] if source_entries else None
+        if not source:
+            raise HTTPException(status_code=422, detail="Không tìm thấy sổ cái nguồn của JOB để lập lịch chi trả.")
+        allocation_note = (
+            f"Khách thanh toán đủ ngày {payload.payment_date.isoformat()}; chia đều bonus đang giữ "
+            f"của JOB {job.job_no} vào {', '.join(selected_payout_months)}."
+        )
+        for allocation in release_allocations:
+            schedule = CommissionPayoutSchedule(
+                sales_rep=job.sales_rep or "(Unknown)",
+                employee_id=source.employee_id,
+                payout_period=allocation["payout_period"],
+                total_amount=allocation["amount"],
+                note=allocation_note,
+                created_by=actor,
+                approved_by=actor,
+            )
+            db.add(schedule)
+            db.flush()
+            ledger = CommissionWalletLedger(
+                period_id=period_id,
+                job_id=job.id,
+                entitlement_id=source.entitlement_id,
+                schedule_id=schedule.id,
+                sales_rep=job.sales_rep or "(Unknown)",
+                employee_id=source.employee_id,
+                entry_type="SCHEDULED",
+                amount=allocation["amount"],
+                payout_period=allocation["payout_period"],
+                reason_code="MANUAL_PAYMENT_SELECTED_MONTHS",
+                note=allocation_note,
+                created_by=actor,
+                approved_by=actor,
+            )
+            db.add(ledger)
+            db.flush()
+            db.add(CommissionPayoutScheduleAllocation(
+                schedule_id=schedule.id,
+                entitlement_id=source.entitlement_id,
+                ledger_entry_id=ledger.id,
+                amount=allocation["amount"],
+            ))
+            schedule_ids.append(schedule.id)
+        job.held_release_mode = (
+            "NEXT_QUARTER_LUMP" if len(selected_payout_months) == 1
+            else "NEXT_QUARTER_SPLIT"
+        )
+        job.held_release_payout_period = payload.payment_month
+
+    cancelled_schedule_ids: list[int] = []
+    if previous_status == "YES" and normalized == "NO":
+        manual_schedule_entries = db.query(CommissionWalletLedger).filter(
+            CommissionWalletLedger.period_id == period_id,
+            CommissionWalletLedger.job_id == job.id,
+            CommissionWalletLedger.entry_type == "SCHEDULED",
+            CommissionWalletLedger.reason_code.in_([
+                "MANUAL_PAYMENT_SPLIT",
+                "MANUAL_PAYMENT_MONTH_RELEASE",
+                "MANUAL_PAYMENT_SELECTED_MONTHS",
+            ]),
+        ).all()
+        for scheduled_entry in manual_schedule_entries:
+            schedule = db.get(CommissionPayoutSchedule, scheduled_entry.schedule_id) if scheduled_entry.schedule_id else None
+            if not schedule or schedule.status != "SCHEDULED":
+                continue
+            allocations = db.query(CommissionPayoutScheduleAllocation).filter(
+                CommissionPayoutScheduleAllocation.schedule_id == schedule.id,
+                CommissionPayoutScheduleAllocation.status == "SCHEDULED",
+            ).all()
+            for allocation in allocations:
+                allocation.status = "CANCELLED"
+            db.add(CommissionWalletLedger(
+                period_id=scheduled_entry.period_id,
+                job_id=scheduled_entry.job_id,
+                entitlement_id=scheduled_entry.entitlement_id,
+                schedule_id=schedule.id,
+                sales_rep=scheduled_entry.sales_rep,
+                employee_id=scheduled_entry.employee_id,
+                entry_type="SCHEDULE_RELEASE",
+                amount=-abs(float(scheduled_entry.amount or 0.0)),
+                payout_period=scheduled_entry.payout_period,
+                reason_code="MANUAL_PAYMENT_REVERSED",
+                note="Payment Received chuyển YES → NO; hủy lịch trả bonus đang giữ chưa chi trả.",
+                created_by=actor,
+                approved_by=actor,
+            ))
+            schedule.status = "CANCELLED"
+            schedule.approved_by = actor
+            cancelled_schedule_ids.append(schedule.id)
+        job.held_release_payout_period = None
+
+    db.add(CommissionWalletLedger(
+        period_id=period_id,
+        job_id=job.id,
+        sales_rep=job.sales_rep or "(Unknown)",
+        employee_id=_employee_id_for_sales_rep(job.sales_rep or "(Unknown)", db),
+        entry_type="PAYMENT_MANUAL_OVERRIDE",
+        amount=0.0,
+        reason_code="MANUAL_PAYMENT_OVERRIDE",
+        note=(
+            f"Payment Received {previous_status} → {normalized}; "
+            f"đã trả {previous_amount:,.2f} → {paid_amount:,.2f}. "
+            f"Ngày khách thanh toán: {payload.payment_date.isoformat() if payload.payment_date else 'không áp dụng'}. "
+            f"{job.bonus_remark}"
+        ),
+        created_by=actor,
+    ))
+    db.commit()
+
+    return {
+        **sync_result,
+        "message": f"Đã cập nhật Payment Received của JOB {job.job_no} và đồng bộ dữ liệu liên quan.",
+        "payment_received": normalized,
+        "payment_received_amount": paid_amount,
+        "receivable_amount": job.receivable_amount,
+        "balance_amount": job.balance_amount,
+        "hold_bonus_percent": hold_percent,
+        "hold_bonus_amount": hold_amount,
+        "wallet_hold_delta": wallet_hold_delta,
+        "payment_month": payload.payment_month,
+        "payment_date": payload.payment_date.isoformat() if payload.payment_date else None,
+        "payout_months": selected_payout_months,
+        "release_allocations": release_allocations,
+        "schedule_ids": schedule_ids,
+        "cancelled_schedule_ids": cancelled_schedule_ids,
+        "wallet_synchronized": True,
+    }
 
 
 @router.patch("/periods/{period_id}/jobs/{job_id}/payment")
@@ -966,6 +2280,80 @@ def create_commission_payment_command(verification_id: int, payload: CommissionP
     return {"message": "Đã lập lệnh chi trả theo JOB. Số tiền chuyển từ đang giữ sang lịch chi trả.", "schedule_ids": schedule_ids, "amount": held_amount}
 
 
+@router.post("/periods/{period_id}/jobs/{job_id}/direct-payout-command")
+def create_direct_commission_payment_command(
+    period_id: int,
+    job_id: int,
+    payload: CommissionPaymentCommandIn,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    """Let accounting pay a held JOB without waiting for an employee request.
+
+    The direct action still records an accounting verification before using the
+    normal payout-command path, so wallet history and employee notifications
+    remain identical to the reviewed-request workflow.
+    """
+    job = db.query(CommissionJob).filter(
+        CommissionJob.id == job_id,
+        CommissionJob.period_id == period_id,
+    ).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy JOB trong kỳ commission.")
+    _ensure_bonus_editable(db, period_id, job.sales_rep or "(Unknown)")
+
+    verification = db.query(CommissionPaymentVerification).filter(
+        CommissionPaymentVerification.job_id == job.id,
+    ).first()
+    if verification and verification.status == "COMMAND_CREATED":
+        raise HTTPException(status_code=409, detail="JOB này đã có lệnh chi trả đang hoạt động.")
+
+    actor = _actor_name(current_user)
+    now = datetime.now(timezone.utc)
+    direct_note = (
+        payload.note.strip()
+        if payload.note and payload.note.strip()
+        else "Kế toán chủ động xác minh và lập lệnh chi trả cho JOB."
+    )
+    if verification:
+        verification.status = "VERIFIED"
+        verification.verification_note = direct_note
+        verification.verified_by = actor
+        verification.verified_at = now
+        verification.command_created_by = None
+        verification.command_created_at = None
+    else:
+        verification = CommissionPaymentVerification(
+            period_id=job.period_id,
+            job_id=job.id,
+            sales_rep=job.sales_rep or "(Unknown)",
+            status="VERIFIED",
+            report_note="Kế toán chủ động chi trả; không có yêu cầu trước từ nhân viên.",
+            verification_note=direct_note,
+            reported_by=actor,
+            reported_at=now,
+            verified_by=actor,
+            verified_at=now,
+        )
+        db.add(verification)
+    job.payment_received = "YES"
+    job.bonus_remark = direct_note
+    db.add(CommissionWalletLedger(
+        period_id=job.period_id,
+        job_id=job.id,
+        sales_rep=job.sales_rep or "(Unknown)",
+        employee_id=_employee_id_for_sales_rep(job.sales_rep or "(Unknown)", db),
+        entry_type="PAYMENT_VERIFIED",
+        amount=0.0,
+        reason_code="ACCOUNTING_DIRECT_PAYOUT",
+        note=direct_note,
+        created_by=actor,
+        approved_by=actor,
+    ))
+    db.flush()
+    return create_commission_payment_command(verification.id, payload, db, current_user)
+
+
 # Commission wallet: immutable ledger, allocation uses the existing monthly
 # commission result and the confirmed positive Profit/Loss ratio per JOB.
 # ────────────────────────────────────────────────────────────────────────────
@@ -1003,6 +2391,14 @@ def _next_commission_payout_periods(period: CommissionPeriod) -> list[str]:
         month = 1 if month == 12 else month + 1
         result.append(f"{year:04d}-{month:02d}")
     return result
+
+
+def _job_policy_hold_for_monthly_base(job: CommissionJob) -> float:
+    """Keep the original three-month base stable after a JOB hold is released."""
+    current_hold = max(0.0, float(job.hold_bonus_amount or 0.0))
+    if current_hold > 0.005 or not job.held_release_payout_period:
+        return current_hold
+    return round(max(0.0, float(job.profit_loss or 0.0)) * 0.30, 2)
 
 
 def _wallet_positions(entries: list[CommissionWalletLedger]) -> dict[tuple[str, Optional[int]], dict]:
@@ -1061,13 +2457,24 @@ def _wallet_positions(entries: list[CommissionWalletLedger]) -> dict[tuple[str, 
         data["payment_held"] = max(0.0, round(data["payment_held"] - data["released"], 2))
         data["manual_held"] = max(0.0, round(data["manual_held"] - data["manual_released"], 2))
         data["held"] = round(data["payment_held"] + data["manual_held"], 2)
-        # A negative available balance is intentional: commission was already paid
-        # then cancelled, so future commission must first offset the recovery.
         data["scheduled"] = max(0.0, round(data["scheduled"], 2))
         data["transferred"] = max(0.0, round(data["transferred_in"], 2))
         data["manual_credit"] = round(data["manual_credit"], 2)
         data["manual_decrease"] = round(data["manual_decrease"], 2)
-        data["available"] = round(data["earned"] - data["held"] - data["scheduled"] - data["paid"] - data["transferred_out"], 2)
+        # "Khả dụng" is the temporary bonus wallet. Automatic hold identifies
+        # the bonus that has been retained and may be moved/scheduled later;
+        # it is therefore the wallet's source, not a deduction from earned.
+        # Manual holds still lock money operationally.
+        data["available"] = round(max(0.0,
+            data["payment_held"]
+            + data["manual_credit"]
+            - data["manual_decrease"]
+            - data["manual_held"]
+            - data["scheduled"]
+            - data["paid"]
+            - data["transferred_out"]),
+            2,
+        )
         data["recoverable"] = max(0.0, round(-data["available"], 2))
         data["earned"] = round(data["earned"], 2)
         data["calculation_earned"] = round(data["calculation_earned"], 2)
@@ -1078,29 +2485,84 @@ def _wallet_positions(entries: list[CommissionWalletLedger]) -> dict[tuple[str, 
 def _period_wallet_allocations(period: CommissionPeriod, db: Session) -> list[tuple[CommissionJob | None, str, float, bool]]:
     """Use get_period_detail so the existing commission formula and overrides stay unchanged."""
     detail = get_period_detail(period.id, db)
-    monthly_bonus_by_rep = {row.sales_rep: round(float(row.sales_bonus or 0.0), 2) for row in detail.sales_rep_summary}
+    quarter_bonus_by_rep = {row.sales_rep: round(float(row.total_bonus_quarter or 0.0), 2) for row in detail.sales_rep_summary}
     jobs_by_rep: dict[str, list[CommissionJob]] = {}
     for job in period.jobs:
         jobs_by_rep.setdefault(job.sales_rep or "(Unknown)", []).append(job)
 
     allocations: list[tuple[CommissionJob | None, str, float, bool]] = []
     for sales_rep, jobs in jobs_by_rep.items():
-        monthly_bonus = monthly_bonus_by_rep.get(sales_rep, 0.0)
-        if abs(monthly_bonus) < 0.005:
+        quarter_bonus = quarter_bonus_by_rep.get(sales_rep, 0.0)
+        if abs(quarter_bonus) < 0.005:
             continue
         weighted_jobs = [job for job in jobs if float(job.profit_loss or 0.0) > 0]
         total_weight = sum(float(job.profit_loss or 0.0) for job in weighted_jobs)
         if total_weight <= 0:
             # An override can create a bonus even when there is no positive P/L.
             # Keep it as a period adjustment and lock it until every JOB is paid.
-            allocations.append((None, sales_rep, monthly_bonus, all(_is_payment_received(job.payment_received) for job in jobs)))
+            allocations.append((None, sales_rep, quarter_bonus, all(_is_payment_received(job.payment_received) for job in jobs)))
             continue
         allocated = 0.0
         for index, job in enumerate(weighted_jobs):
-            amount = round(monthly_bonus - allocated, 2) if index == len(weighted_jobs) - 1 else round(monthly_bonus * float(job.profit_loss or 0.0) / total_weight, 2)
+            amount = round(quarter_bonus - allocated, 2) if index == len(weighted_jobs) - 1 else round(quarter_bonus * float(job.profit_loss or 0.0) / total_weight, 2)
             allocated += amount
             allocations.append((job, sales_rep, amount, _is_payment_received(job.payment_received)))
     return allocations
+
+
+def _period_wallet_hold_targets(period: CommissionPeriod, db: Session) -> dict[int, float]:
+    """Allocate only the temporarily-held bonus across the period's JOBs."""
+    from app.services.commission_wallet_rules import calculate_company_bonus_wallet, calculate_job_hold
+
+    detail = get_period_detail(period.id, db)
+    summary_by_rep = {row.sales_rep: row for row in detail.sales_rep_summary}
+    allocations = _period_wallet_allocations(period, db)
+    totals_by_rep: dict[str, float] = {}
+    for _job, sales_rep, amount, _paid in allocations:
+        totals_by_rep[sales_rep] = round(totals_by_rep.get(sales_rep, 0.0) + amount, 2)
+
+    temporary_by_rep: dict[str, float] = {}
+    for sales_rep, summary in summary_by_rep.items():
+        policy_hold = sum(
+            calculate_job_hold(
+                profit_loss=job.profit_loss,
+                balance_amount=job.balance_amount,
+                payment_received_amount=job.payment_received_amount,
+            )[1]
+            for job in period.jobs
+            if (job.sales_rep or "(Unknown)") == sales_rep
+        )
+        rule = calculate_company_bonus_wallet(
+            total_profit_loss=summary.total_profit_loss,
+            total_bonus_quarter=summary.total_bonus_quarter,
+            monthly_bonus=summary.sales_bonus,
+            policy_hold_amount=policy_hold,
+        )
+        temporary_by_rep[sales_rep] = float(rule["temporary_bonus_available"])
+
+    targets: dict[int, float] = {}
+    allocated_by_rep: dict[str, float] = {}
+    jobs_per_rep: dict[str, list[tuple[CommissionJob, float]]] = {}
+    for job, sales_rep, amount, _paid in allocations:
+        if job is not None and calculate_job_hold(
+            profit_loss=job.profit_loss,
+            balance_amount=job.balance_amount,
+            payment_received_amount=job.payment_received_amount,
+        )[1] > 0:
+            jobs_per_rep.setdefault(sales_rep, []).append((job, amount))
+    for sales_rep, job_allocations in jobs_per_rep.items():
+        total_bonus = totals_by_rep.get(sales_rep, 0.0)
+        temporary_total = min(total_bonus, temporary_by_rep.get(sales_rep, 0.0))
+        eligible_bonus = sum(amount for _job, amount in job_allocations)
+        for index, (job, amount) in enumerate(job_allocations):
+            target = (
+                round(temporary_total - allocated_by_rep.get(sales_rep, 0.0), 2)
+                if index == len(job_allocations) - 1
+                else round(temporary_total * amount / eligible_bonus, 2) if eligible_bonus > 0 else 0.0
+            )
+            allocated_by_rep[sales_rep] = round(allocated_by_rep.get(sales_rep, 0.0) + target, 2)
+            targets[job.id] = max(0.0, target)
+    return targets
 
 
 def _employee_id_for_sales_rep(sales_rep: str, db: Session) -> Optional[int]:
@@ -1174,8 +2636,10 @@ def sync_commission_wallet(
         positions = _wallet_positions(current_entries)
         detail = get_period_detail(period.id, db)
         summary_by_rep = {item.sales_rep: item for item in detail.sales_rep_summary}
+        wallet_hold_targets = _period_wallet_hold_targets(period, db)
         snapshots: dict[str, CommissionCalculationSnapshot] = {}
-        for job, sales_rep, desired_amount, payment_received in _period_wallet_allocations(period, db):
+        fixed_hold_job_ids: set[int] = set()
+        for job, sales_rep, desired_amount, _payment_received in _period_wallet_allocations(period, db):
             if _bonus_lock_for(db, period.id, sales_rep):
                 skipped_locked.add(f"{period.id}:{sales_rep}")
                 continue
@@ -1210,40 +2674,43 @@ def sync_commission_wallet(
                 db.add(entitlement)
                 db.flush()
             if abs(delta) >= 0.01:
-                event_type = ("ACCRUAL_AVAILABLE" if payment_received else "ACCRUAL_HELD") if position is None else ("ADJUSTMENT_AVAILABLE" if payment_received else "ADJUSTMENT_HELD")
+                # Earned bonus and the Profit/Loss-based hold are separate
+                # ledger facts. Accrue first, then reconcile the JOB hold.
+                event_type = "ACCRUAL_AVAILABLE" if position is None else "ADJUSTMENT_AVAILABLE"
                 db.add(CommissionWalletLedger(
                     period_id=period.id, job_id=job_id, entitlement_id=entitlement.id, sales_rep=sales_rep, employee_id=employee_id,
                     entry_type=event_type, amount=delta,
                     note=f"Phân bổ commission kỳ {period.period_label} theo tỷ trọng Profit/Loss dương.", reason_code="CALCULATION",
                 ))
                 created += 1
-            # Existing held amount is moved by a RELEASED event once Payment Received becomes YES.
-            refreshed = db.query(CommissionWalletLedger).filter(
-                CommissionWalletLedger.period_id == period.id,
-                CommissionWalletLedger.sales_rep == sales_rep,
-                CommissionWalletLedger.job_id.is_(job_id) if job_id is None else CommissionWalletLedger.job_id == job_id,
-            ).all()
-            # Only the automatic hold is unlocked after Payment Received becomes YES.
-            # A manual JOB hold remains locked until an administrator releases it.
-            held_amount = _wallet_positions(refreshed).get(key, {}).get("payment_held", 0.0)
-            if release_on_sync and payment_received and held_amount >= 0.01:
-                db.add(CommissionWalletLedger(
-                    period_id=period.id, job_id=job_id, entitlement_id=entitlement.id, sales_rep=sales_rep, employee_id=employee_id,
-                    entry_type="RELEASED", amount=held_amount, reason_code="PAYMENT_RECEIVED",
-                    note="Khách hàng đã thanh toán; mở khóa commission từ ví giữ lại.",
-                ))
-                released += 1
-            elif not payment_received:
-                # A later YES -> NO edit must re-hold the still-unpaid balance.
-                # Manual holds are already excluded from available and are never duplicated.
-                available_amount = _wallet_positions(refreshed).get(key, {}).get("available", 0.0)
-                if available_amount >= 0.01:
-                    db.add(CommissionWalletLedger(
-                        period_id=period.id, job_id=job_id, entitlement_id=entitlement.id, sales_rep=sales_rep, employee_id=employee_id,
-                        entry_type="PAYMENT_STATUS_HOLD", amount=available_amount, reason_code="PAYMENT_NOT_RECEIVED",
-                        note="Payment Received chuyển sang NO; giữ lại commission khả dụng của JOB.",
-                    ))
+            db.flush()
+            if job is not None:
+                hold_delta = _apply_fixed_job_hold(
+                    db,
+                    job,
+                    reason_code="FIXED_HOLD_BONUS_30",
+                    note=f"Hold cố định 30% Profit/Loss dương của JOB {job.job_no}.",
+                    wallet_hold_amount=wallet_hold_targets.get(job.id, 0.0),
+                )
+                fixed_hold_job_ids.add(job.id)
+                if abs(hold_delta) >= 0.01:
                     created += 1
+        # Zero/negative-P&L JOBs may receive no formula allocation, but their
+        # percentage column still follows the same fixed policy. Their hold is
+        # zero because only positive JOB Profit/Loss contributes to the hold.
+        db.flush()
+        for job in period.jobs:
+            if job.id in fixed_hold_job_ids or _bonus_lock_for(db, period.id, job.sales_rep or "(Unknown)"):
+                continue
+            hold_delta = _apply_fixed_job_hold(
+                db,
+                job,
+                reason_code="FIXED_HOLD_BONUS_30",
+                note=f"Hold cố định 30% Profit/Loss dương của JOB {job.job_no}.",
+                wallet_hold_amount=wallet_hold_targets.get(job.id, 0.0),
+            )
+            if abs(hold_delta) >= 0.01:
+                created += 1
     # Final reconciliation: a paid JOB may have several historical HOLD rows
     # (for example after a formula adjustment). Never leave a rounding residue
     # in automatic hold once its Payment Received status is YES.
@@ -1332,43 +2799,120 @@ def get_commission_wallet(
             detail = get_period_detail(period_id, db)
             rep_summary = next((row for row in detail.sales_rep_summary if row.sales_rep == rep), None)
             if rep_summary:
-                # The automatic Payment Received hold belongs to the whole
-                # source quarter.  For the wallet overview it must therefore
-                # be allocated over its three salary months, not subtracted
-                # three times from one monthly entitlement.
-                source_positions = [
-                    data for (position_rep, job_id), data in positions.items()
-                    if position_rep == rep and any(entry.period_id == period_id for entry in data["entries"])
-                ]
-                source_hold = 0.0
-                for position in source_positions:
-                    release_allocated = sum(
-                        float(entry.amount or 0.0)
-                        for entry in position["entries"]
-                        if entry.entry_type in {"PAYMENT_RELEASE_ALLOCATION", "PAYMENT_RELEASE_REVERSAL"}
-                    )
-                    source_hold += float(position["payment_held"] or 0.0) + max(0.0, round(release_allocated, 2))
-                source_hold = round(source_hold, 2)
+                from app.services.commission_wallet_rules import calculate_company_bonus_wallet
+                # “Đang giữ” is the saved 30%-of-Profit/Loss amount on JOB rows,
+                # not the legacy full wallet lock that existed while Payment
+                # Received was still NO.  This keeps history and JOB detail on
+                # one auditable source of truth.
+                period_rep_jobs = db.query(CommissionJob).filter(
+                    CommissionJob.period_id == period_id,
+                    CommissionJob.sales_rep == rep,
+                ).all()
+                current_source_hold = round(sum(
+                    max(0.0, float(job.hold_bonus_amount or 0.0))
+                    for job in period_rep_jobs
+                ), 2)
+                base_policy_hold = round(sum(
+                    _job_policy_hold_for_monthly_base(job)
+                    for job in period_rep_jobs
+                ), 2)
+                # Payment Received remains an audit field for receivables and
+                # payout eligibility. It must never become an input to the
+                # commission formula shown as "Tổng thưởng".
+                payment_received_total = round(float(db.query(
+                    func.coalesce(func.sum(CommissionJob.payment_received_amount), 0.0)
+                ).filter(
+                    CommissionJob.period_id == period_id,
+                    CommissionJob.sales_rep == rep,
+                    func.upper(func.coalesce(CommissionJob.payment_received, "NO")) == "YES",
+                    CommissionJob.payment_received_amount > 0,
+                ).scalar() or 0.0), 2)
                 quarter_total = round(float(rep_summary.total_bonus_quarter or 0.0), 2)
+                formula_coefficient = round(float(rep_summary.bonus_rate or 0.0), 4)
+                formula_monthly_bonus = round(float(rep_summary.sales_bonus or 0.0), 2)
+                wallet_rule = calculate_company_bonus_wallet(
+                    total_profit_loss=rep_summary.total_profit_loss,
+                    total_bonus_quarter=quarter_total,
+                    monthly_bonus=formula_monthly_bonus,
+                    policy_hold_amount=base_policy_hold,
+                )
                 payout_periods = _source_payout_periods(period_record) if period_record else []
-                regular_month = round(quarter_total / 3, 2)
-                held_month = round(source_hold / 3, 2)
-                monthly_available_amounts = []
-                for index, payout_period in enumerate(payout_periods):
-                    month_bonus = regular_month if index < 2 else round(quarter_total - regular_month * 2, 2)
-                    month_hold = held_month if index < 2 else round(source_hold - held_month * 2, 2)
-                    monthly_available_amounts.append({
-                        "payout_period": payout_period,
-                        "amount": round(month_bonus - month_hold, 2),
-                    })
+
+                # The base bonus always remains split equally over the three
+                # normal payout months. A manual NO -> YES correction divides
+                # the released JOB hold only among selected remaining months;
+                # every unselected base amount must remain unchanged.
+                manual_release_entries = db.query(CommissionWalletLedger).join(
+                    CommissionPayoutSchedule,
+                    CommissionPayoutSchedule.id == CommissionWalletLedger.schedule_id,
+                ).filter(
+                    CommissionWalletLedger.period_id == period_id,
+                    CommissionWalletLedger.sales_rep == rep,
+                    CommissionWalletLedger.reason_code.in_([
+                        "MANUAL_PAYMENT_SPLIT",
+                        "MANUAL_PAYMENT_MONTH_RELEASE",
+                        "MANUAL_PAYMENT_SELECTED_MONTHS",
+                    ]),
+                    CommissionPayoutSchedule.status.in_(["SCHEDULED", "PAID"]),
+                ).all()
+                if manual_release_entries and period_record:
+                    payout_periods = _next_commission_payout_periods(period_record)
+                    split_amount_by_month: dict[str, float] = {}
+                    base_monthly_amount = round(float(wallet_rule["monthly_payout"]), 2)
+                    for entry in manual_release_entries:
+                        if not entry.payout_period:
+                            continue
+                        split_amount_by_month[entry.payout_period] = round(
+                            split_amount_by_month.get(entry.payout_period, 0.0)
+                            + float(entry.amount or 0.0),
+                            2,
+                        )
+                    monthly_available_amounts = [
+                        {
+                            "payout_period": payout_period,
+                            "base_amount": base_monthly_amount,
+                            "released_amount": round(split_amount_by_month.get(payout_period, 0.0), 2),
+                            "amount": round(
+                                base_monthly_amount
+                                + split_amount_by_month.get(payout_period, 0.0),
+                                2,
+                            ),
+                        }
+                        for payout_period in payout_periods
+                    ]
+                else:
+                    monthly_available_amounts = [
+                        {
+                            "payout_period": payout_period,
+                            "base_amount": round(float(wallet_rule["monthly_payout"]), 2),
+                            "released_amount": 0.0,
+                            "amount": round(float(wallet_rule["monthly_payout"]), 2),
+                        }
+                        for payout_period in payout_periods
+                    ]
                 period_summaries.append({
                     "period_id": period_id,
                     "period_label": detail.period_label,
                     "payout_periods": payout_periods,
                     "total_profit_loss": float(rep_summary.total_profit_loss or 0.0),
                     "total_bonus_quarter": quarter_total,
+                    "formula_total_bonus_quarter": quarter_total,
+                    "formula_effective_coefficient": formula_coefficient,
+                    "formula_monthly_bonus": formula_monthly_bonus,
+                    "payment_received_total": payment_received_total,
+                    "gross_total_bonus_quarter": quarter_total,
+                    # Backwards-compatible keys now mirror the formula result;
+                    # consumers must not substitute Payment Received for bonus.
+                    "hold_adjusted_total_bonus": quarter_total,
+                    "cash_basis_coefficient": formula_coefficient,
+                    "cash_basis_monthly_bonus": formula_monthly_bonus,
                     "monthly_bonus": float(rep_summary.sales_bonus or 0.0),
-                    "quarter_hold_amount": source_hold,
+                    "policy_hold_amount": current_source_hold,
+                    "quarter_hold_amount": float(wallet_rule["company_held_profit"]),
+                    "holds_entire_profit": bool(wallet_rule["holds_entire_profit"]),
+                    "monthly_payout": float(wallet_rule["monthly_payout"]),
+                    "temporary_bonus_opening": float(wallet_rule["temporary_bonus_available"]),
+                    "temporary_bonus_available": max(0.0, round(float(item["available_amount"]), 2)),
                     "monthly_available_amounts": monthly_available_amounts,
                 })
         item["period_summaries"] = period_summaries
@@ -1474,19 +3018,18 @@ def get_commission_wallet_jobs(
     db: Session = Depends(get_db),
 ):
     """Full JOB detail for the bonus-hold screen; calculation values remain ledger-derived."""
-    if not sales_rep:
-        return []
-    entry_query = db.query(CommissionWalletLedger).filter(
-        CommissionWalletLedger.sales_rep == sales_rep,
-    )
+    entry_query = db.query(CommissionWalletLedger)
+    if sales_rep:
+        entry_query = entry_query.filter(CommissionWalletLedger.sales_rep == sales_rep)
     if period_id is not None:
         entry_query = entry_query.filter(CommissionWalletLedger.period_id == period_id)
     entries = entry_query.order_by(CommissionWalletLedger.created_at.asc(), CommissionWalletLedger.id.asc()).all()
     positions = _wallet_positions(entries)
     jobs_query = db.query(CommissionJob).join(CommissionPeriod).filter(
-        CommissionJob.sales_rep == sales_rep,
         CommissionPeriod.is_voided.is_(False),
     )
+    if sales_rep:
+        jobs_query = jobs_query.filter(CommissionJob.sales_rep == sales_rep)
     if period_id is not None:
         jobs_query = jobs_query.filter(CommissionJob.period_id == period_id)
     jobs = jobs_query.order_by(CommissionPeriod.from_date.asc(), CommissionJob.id.asc()).all()
@@ -1508,27 +3051,33 @@ def get_commission_wallet_jobs(
             if schedule.payment_verification_id not in command_note_by_verification and schedule.note:
                 command_note_by_verification[schedule.payment_verification_id] = schedule.note
     period_summaries = {}
-    for period_id in {job.period_id for job in jobs}:
-        detail = get_period_detail(period_id, db)
-        rep_summary = next((row for row in detail.sales_rep_summary if row.sales_rep == sales_rep), None)
-        if rep_summary:
-            period_summaries[period_id] = {
+    for source_period_id in {job.period_id for job in jobs}:
+        detail = get_period_detail(source_period_id, db)
+        for rep_summary in detail.sales_rep_summary:
+            period_summaries[(source_period_id, rep_summary.sales_rep)] = {
                 "profit_loss": float(rep_summary.total_profit_loss or 0.0),
+                "target": float(rep_summary.target or 0.0),
+                "coefficient": float(rep_summary.coefficient or 0.0),
                 "total_bonus_quarter": float(rep_summary.total_bonus_quarter or 0.0),
                 "monthly_bonus": float(rep_summary.sales_bonus or 0.0),
             }
     result = []
     for job in jobs:
         verification = verification_by_job.get(job.id)
-        position = positions.get((sales_rep, job.id), {})
+        visible_verification = verification if verification and verification.status != "CANCELLED" else None
+        job_sales_rep = job.sales_rep or "(Unknown)"
+        position = positions.get((job_sales_rep, job.id), {})
         period = job.period
-        period_summary = period_summaries.get(job.period_id, {})
+        period_summary = period_summaries.get((job.period_id, job_sales_rep), {})
         result.append({
             "id": job.id,
             "periodId": job.period_id,
+            "customerPaymentPeriods": _source_payout_periods(period) if period else [],
             "nextReleasePayoutPeriods": _next_commission_payout_periods(period) if period else [],
             "periodLabel": period.period_label if period else f"Kỳ #{job.period_id}",
             "periodProfitLoss": period_summary.get("profit_loss", 0.0),
+            "periodTarget": period_summary.get("target", 0.0),
+            "periodCoefficient": period_summary.get("coefficient", 0.0),
             "periodTotalBonusQuarter": period_summary.get("total_bonus_quarter", 0.0),
             "periodMonthlyBonus": period_summary.get("monthly_bonus", 0.0),
             "jobNo": job.job_no,
@@ -1554,16 +3103,22 @@ def get_commission_wallet_jobs(
             "profitLoss": job.profit_loss,
             "containerPicked": job.container_picked,
             "paymentReceived": job.payment_received,
+            "receivableAmount": job.receivable_amount,
+            "balanceAmount": job.balance_amount,
+            "paymentReceivedAmount": job.payment_received_amount,
+            "holdBonusPercent": job.hold_bonus_percent,
+            "holdBonusAmount": job.hold_bonus_amount,
             "remark": job.bonus_remark,
             "heldReleaseMode": job.held_release_mode or "NEXT_QUARTER_LUMP",
             "heldReleasePayoutPeriod": job.held_release_payout_period,
-            "paymentVerificationId": verification.id if verification else None,
-            "paymentVerificationStatus": verification.status if verification else None,
-            "paymentReportNote": verification.report_note if verification else None,
-            "paymentVerificationNote": verification.verification_note if verification else None,
-            "paymentCommandNote": command_note_by_verification.get(verification.id) if verification else None,
-            "paymentReportedAt": verification.reported_at.isoformat() if verification and verification.reported_at else None,
+            "paymentVerificationId": visible_verification.id if visible_verification else None,
+            "paymentVerificationStatus": visible_verification.status if visible_verification else None,
+            "paymentReportNote": visible_verification.report_note if visible_verification else None,
+            "paymentVerificationNote": visible_verification.verification_note if visible_verification else None,
+            "paymentCommandNote": command_note_by_verification.get(visible_verification.id) if visible_verification else None,
+            "paymentReportedAt": visible_verification.reported_at.isoformat() if visible_verification and visible_verification.reported_at else None,
             "earned": position.get("earned", 0.0),
+            "calculationEarned": position.get("calculation_earned", 0.0),
             "manualCredit": position.get("manual_credit", 0.0),
             "manualDecrease": position.get("manual_decrease", 0.0),
             "paymentHeld": position.get("payment_held", 0.0),
@@ -1996,12 +3551,50 @@ def list_commission_payout_schedules(
         ]
         if period_id is not None and not matching_allocations:
             continue
+        matching_entries = [
+            entries_by_allocation_id[allocation.id]
+            for allocation in matching_allocations
+            if entries_by_allocation_id.get(allocation.id)
+        ]
+        job_ids = {entry.job_id for entry in matching_entries if entry.job_id is not None}
+        period_ids = {entry.period_id for entry in matching_entries if entry.period_id is not None}
+        jobs_by_id = {
+            job.id: job
+            for job in db.query(CommissionJob).filter(CommissionJob.id.in_(job_ids)).all()
+        } if job_ids else {}
+        periods_by_id = {
+            period.id: period
+            for period in db.query(CommissionPeriod).filter(CommissionPeriod.id.in_(period_ids)).all()
+        } if period_ids else {}
+        schedule_jobs = []
+        seen_job_ids = set()
+        for allocation in matching_allocations:
+            entry = entries_by_allocation_id.get(allocation.id)
+            if not entry or entry.job_id is None or entry.job_id in seen_job_ids:
+                continue
+            seen_job_ids.add(entry.job_id)
+            job = jobs_by_id.get(entry.job_id)
+            period = periods_by_id.get(entry.period_id)
+            schedule_jobs.append({
+                "job_id": entry.job_id,
+                "job_no": job.job_no if job else f"JOB #{entry.job_id}",
+                "period_id": entry.period_id,
+                "period_label": period.period_label if period else f"Kỳ #{entry.period_id}",
+                "amount": round(sum(
+                    candidate.amount
+                    for candidate in matching_allocations
+                    if (candidate_entry := entries_by_allocation_id.get(candidate.id))
+                    and candidate_entry.job_id == entry.job_id
+                ), 2),
+            })
         result.append({
             "id": item.id,
             "sales_rep": item.sales_rep,
             "payout_period": item.payout_period,
             "status": item.status,
             "total_amount": round(sum(allocation.amount for allocation in matching_allocations), 2) if period_id is not None else item.total_amount,
+            "job_count": len({entry.job_id for entry in matching_entries if entry.job_id is not None}),
+            "jobs": schedule_jobs,
             "note": item.note,
             "source_period_ids": source_period_ids,
             "is_period_scoped": period_id is None or source_period_ids == [period_id],
@@ -2013,37 +3606,86 @@ def _finish_schedule(schedule_id: int, status_value: str, note: Optional[str], d
     schedule = db.get(CommissionPayoutSchedule, schedule_id)
     if not schedule or schedule.status != "SCHEDULED":
         raise HTTPException(status_code=409, detail="Lịch chi trả không tồn tại hoặc không còn ở trạng thái đã lập lịch.")
+    action_note = note.strip() if note and note.strip() else None
+    if status_value == "CANCELLED" and not action_note:
+        raise HTTPException(status_code=422, detail="Vui lòng nhập lý do hủy lịch chi trả.")
     actor = current_user.username if hasattr(current_user, "username") else str(current_user.id)
     allocations = db.query(CommissionPayoutScheduleAllocation).filter(CommissionPayoutScheduleAllocation.schedule_id == schedule.id, CommissionPayoutScheduleAllocation.status == "SCHEDULED").all()
+    affected_jobs: dict[int, tuple[CommissionJob, Optional[int]]] = {}
     for allocation in allocations:
         reserved = db.get(CommissionWalletLedger, allocation.ledger_entry_id)
         if not reserved:
             continue
         _ensure_bonus_editable(db, reserved.period_id, reserved.sales_rep)
-        common = dict(period_id=reserved.period_id, job_id=reserved.job_id, entitlement_id=reserved.entitlement_id, schedule_id=schedule.id, sales_rep=reserved.sales_rep, employee_id=reserved.employee_id, payout_period=schedule.payout_period, note=note or schedule.note, created_by=actor)
+        common = dict(period_id=reserved.period_id, job_id=reserved.job_id, entitlement_id=reserved.entitlement_id, schedule_id=schedule.id, sales_rep=reserved.sales_rep, employee_id=reserved.employee_id, payout_period=schedule.payout_period, note=action_note or schedule.note, created_by=actor)
         db.add(CommissionWalletLedger(**common, entry_type="SCHEDULE_RELEASE", amount=-allocation.amount, reason_code="SCHEDULE_RELEASE"))
         if status_value == "PAID":
             db.add(CommissionWalletLedger(**common, entry_type="PAID", amount=allocation.amount, reason_code="SCHEDULE_PAID", approved_by=actor))
         elif schedule.payment_verification_id:
             # A cancelled accounting command returns only its cancelled amount
             # to the automatic hold. Existing ledger rows are never altered.
-            db.add(CommissionWalletLedger(**common, entry_type="PAYMENT_STATUS_HOLD", amount=allocation.amount, reason_code="PAYMENT_COMMAND_CANCELLED", note=note or "Hủy lệnh chi trả; hoàn lại số tiền vào đang giữ của JOB."))
+            db.add(CommissionWalletLedger(**common, entry_type="PAYMENT_STATUS_HOLD", amount=allocation.amount, reason_code="PAYMENT_COMMAND_CANCELLED"))
+        if status_value == "CANCELLED" and reserved.job_id is not None:
+            job = db.get(CommissionJob, reserved.job_id)
+            if job:
+                affected_jobs[job.id] = (job, reserved.employee_id or schedule.employee_id)
         allocation.status = status_value
     schedule.status = status_value
+    if action_note:
+        schedule.note = action_note
     schedule.approved_by = actor
     if status_value == "CANCELLED" and schedule.payment_verification_id:
         remaining = db.query(CommissionPayoutSchedule).filter(
             CommissionPayoutSchedule.payment_verification_id == schedule.payment_verification_id,
             CommissionPayoutSchedule.status == "SCHEDULED",
+            CommissionPayoutSchedule.id != schedule.id,
         ).count()
         if remaining == 0:
             verification = db.get(CommissionPaymentVerification, schedule.payment_verification_id)
             if verification:
-                verification.status = "VERIFIED"
+                # Keep the audit row, but expose this workflow as a fresh,
+                # requestable JOB again in both accounting and employee views.
+                verification.status = "CANCELLED"
+                verification.verification_note = f"Đã hủy lịch chi trả: {action_note}"
+                verification.verified_by = None
+                verification.verified_at = None
                 verification.command_created_by = None
                 verification.command_created_at = None
+                job = db.get(CommissionJob, verification.job_id)
+                if job:
+                    job.payment_received = "NO"
+                    job.bonus_remark = f"Lịch chi trả đã hủy: {action_note}"
+                    affected_jobs.setdefault(job.id, (job, schedule.employee_id))
+
+    if status_value == "CANCELLED" and schedule.payment_verification_id:
+        from app.models.employee import Employee
+
+        for job, employee_id in affected_jobs.values():
+            if not employee_id:
+                continue
+            target_employee = db.get(Employee, employee_id)
+            if not target_employee:
+                continue
+            add_employee_notification(
+                db,
+                target_employee,
+                category=BONUS,
+                event_type="BONUS_PAYOUT_CANCELLED",
+                title=f"Đã hủy lịch chi trả bonus JOB {job.job_no}",
+                message=(
+                    f"Kế toán đã hủy lịch chi trả bonus JOB {job.job_no}, tháng {schedule.payout_period}. "
+                    f"Lý do: {action_note}. JOB đã trở về trạng thái chưa yêu cầu và bonus được hoàn vào đang giữ."
+                ),
+                actor_user_id=actor_id(current_user),
+                resource_type="COMMISSION_JOB",
+                resource_id=job.id,
+                action_url="/user/my-held-bonuses",
+            )
     db.commit()
-    return {"message": "Đã chi trả lịch bonus." if status_value == "PAID" else "Đã hủy lịch chi trả bonus.", "schedule_id": schedule.id}
+    return {
+        "message": "Đã chi trả lịch bonus." if status_value == "PAID" else "Đã hủy lịch chi trả bonus và hoàn JOB về trạng thái đang giữ.",
+        "schedule_id": schedule.id,
+    }
 
 
 @router.post("/wallet/schedules/{schedule_id}/pay")
@@ -2052,8 +3694,8 @@ def pay_commission_schedule(schedule_id: int, payload: CommissionScheduleActionI
 
 
 @router.post("/wallet/schedules/{schedule_id}/cancel")
-def cancel_commission_schedule(schedule_id: int, payload: CommissionScheduleActionIn, db: Session = Depends(get_db), current_user=Depends(get_admin_user)):
-    return _finish_schedule(schedule_id, "CANCELLED", payload.note, db, current_user)
+def cancel_commission_schedule(schedule_id: int, payload: CommissionScheduleCancelIn, db: Session = Depends(get_db), current_user=Depends(get_admin_user)):
+    return _finish_schedule(schedule_id, "CANCELLED", payload.reason, db, current_user)
 
 
 # ══════════════════════════════════════════════════════
@@ -2069,11 +3711,23 @@ def delete_period(period_id: int, db: Session = Depends(get_db)):
     ).all()
     if locked_reps:
         raise HTTPException(status_code=409, detail="Không thể xóa kỳ commission vì đang có bảng bonus đã khóa.")
+    receivable_attachments = db.query(CommissionJobReceivableAttachment).filter(
+        CommissionJobReceivableAttachment.period_id == period_id,
+    ).all()
+    receivable_paths = [COMMISSION_RECEIVABLE_UPLOAD_DIR / item.stored_filename for item in receivable_attachments]
+    db.query(CommissionJobReceivableLink).filter(
+        CommissionJobReceivableLink.period_id == period_id,
+    ).delete(synchronize_session=False)
+    db.query(CommissionJobReceivableAttachment).filter(
+        CommissionJobReceivableAttachment.period_id == period_id,
+    ).delete(synchronize_session=False)
     db.query(CommissionWalletLedger).filter(CommissionWalletLedger.period_id == period_id).delete(synchronize_session=False)
     db.query(CommissionRepOverride).filter(CommissionRepOverride.period_id == period_id).delete(synchronize_session=False)
     db.query(CommissionJob).filter(CommissionJob.period_id == period_id).delete(synchronize_session=False)
     db.delete(period)
     db.commit()
+    for path in receivable_paths:
+        path.unlink(missing_ok=True)
     return {"message": f"Đã xóa toàn bộ commission của kỳ ID {period_id}."}
 
 
@@ -2087,6 +3741,24 @@ def delete_sales_rep_commission(period_id: int, sales_rep: str, db: Session = De
     job_count = db.query(CommissionJob).filter(CommissionJob.period_id == period_id, CommissionJob.sales_rep == sales_rep).count()
     if not job_count:
         raise HTTPException(status_code=404, detail="Không tìm thấy commission của nhân viên này trong kỳ đã chọn.")
+    rep_job_ids = [row[0] for row in db.query(CommissionJob.id).filter(
+        CommissionJob.period_id == period_id,
+        CommissionJob.sales_rep == sales_rep,
+    ).all()]
+    receivable_attachment_ids = [row[0] for row in db.query(
+        CommissionJobReceivableLink.attachment_id,
+    ).filter(CommissionJobReceivableLink.job_id.in_(rep_job_ids)).distinct().all()]
+    db.query(CommissionJobReceivableLink).filter(
+        CommissionJobReceivableLink.job_id.in_(rep_job_ids),
+    ).delete(synchronize_session=False)
+    db.flush()
+    orphan_attachments = db.query(CommissionJobReceivableAttachment).filter(
+        CommissionJobReceivableAttachment.id.in_(receivable_attachment_ids),
+        ~CommissionJobReceivableAttachment.job_links.any(),
+    ).all() if receivable_attachment_ids else []
+    receivable_paths = [COMMISSION_RECEIVABLE_UPLOAD_DIR / item.stored_filename for item in orphan_attachments]
+    for attachment in orphan_attachments:
+        db.delete(attachment)
     wallet_count = db.query(CommissionWalletLedger).filter(CommissionWalletLedger.period_id == period_id, CommissionWalletLedger.sales_rep == sales_rep).count()
     db.query(CommissionWalletLedger).filter(CommissionWalletLedger.period_id == period_id, CommissionWalletLedger.sales_rep == sales_rep).delete(synchronize_session=False)
     db.query(CommissionRepOverride).filter(CommissionRepOverride.period_id == period_id, CommissionRepOverride.sales_rep == sales_rep).delete(synchronize_session=False)
@@ -2096,6 +3768,8 @@ def delete_sales_rep_commission(period_id: int, sales_rep: str, db: Session = De
         db.query(CommissionRepOverride).filter(CommissionRepOverride.period_id == period_id).delete(synchronize_session=False)
         db.delete(period)
     db.commit()
+    for path in receivable_paths:
+        path.unlink(missing_ok=True)
     return {
         "message": f"Đã xóa commission và phễu thưởng của {sales_rep} trong kỳ đã chọn.",
         "jobs_deleted": job_count,

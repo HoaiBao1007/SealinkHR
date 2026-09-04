@@ -7,7 +7,7 @@ import unicodedata
 
 from sqlalchemy.orm import Session
 
-from app.core.roles import ADMIN, HR_ADMIN, IT_ADMIN, USER
+from app.core.roles import ADMIN, DIRECTOR, HR_ADMIN, IT_ADMIN, USER
 from app.models.department import Department
 from app.models.employee import Employee
 from app.models.organization import OrganizationAssignment, OrganizationUnit
@@ -15,6 +15,7 @@ from app.models.user import User
 
 
 SHARED_IT_ADMIN_USERNAME = "admin_sealink"
+DIRECTOR_EMPLOYEE_NAMES = frozenset({"ton that trung kien", "to to van"})
 
 
 def _normalize(value: str | None) -> str:
@@ -55,6 +56,8 @@ def infer_employee_access_role(db: Session, employee: Employee) -> tuple[str, st
     linked_user = db.get(User, employee.user_id) if employee.user_id else None
     if linked_user and linked_user.username.casefold() == SHARED_IT_ADMIN_USERNAME:
         return IT_ADMIN, "Tài khoản quản trị cao nhất: toàn quyền nghiệp vụ, Backup và Audit"
+    if _normalize(employee.full_name) in DIRECTOR_EMPLOYEE_NAMES:
+        return DIRECTOR, "Giám đốc: kế thừa toàn bộ quyền nghiệp vụ của Kế toán trưởng"
     if linked_user and linked_user.role == ADMIN:
         return ADMIN, "Tài khoản Kế toán trưởng được chỉ định và bảo vệ"
 

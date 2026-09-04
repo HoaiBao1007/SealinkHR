@@ -9,6 +9,7 @@ from app.models.employee import Employee
 from app.api.employees import EmployeeResponse
 from app.services.access_role_service import sync_all_employee_access_roles
 from app.services.salary import FIXED_NON_SALES_BONUS_RULES, is_sales_bonus_department
+from app.services.employee_visibility import is_current_employee
 
 router = APIRouter(tags=["departments"], dependencies=[Depends(get_admin_user)])
 
@@ -60,14 +61,15 @@ def get_departments(db: Session = Depends(get_db)):
     result = []
     for dept in departments:
         rules = get_active_department_rules(db, dept.id, current_period)
+        current_manager = dept.manager if dept.manager and is_current_employee(dept.manager) else None
         dept_dict = {
             "id": dept.id,
             "name": dept.name,
             "manager_id": dept.manager_id,
             "parent_id": dept.parent_id,
             "sort_order": dept.sort_order,
-            "manager": dept.manager,
-            "employees": dept.employees,
+            "manager": current_manager,
+            "employees": [employee for employee in dept.employees if is_current_employee(employee)],
             "current_bonus_rules": rules
         }
         result.append(dept_dict)

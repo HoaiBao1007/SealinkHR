@@ -1,4 +1,4 @@
-export type EmployeeType = 'PROBATION' | 'INTERN' | 'FULLTIME';
+export type EmployeeType = 'PROBATION' | 'INTERN' | 'TRAINEE' | 'FULLTIME';
 
 export interface SalaryTaxBracket {
   up_to: number | null;
@@ -125,6 +125,35 @@ export function cake_salary(employee: EmployeeSalaryInput, salaryPolicy: SalaryP
   const DEDUCT_SELF = policy.personal_deduction;
   const DEDUCT_DEP = policy.dependent_deduction;
   const STANDARD_DAYS = employee.standard_working_days || 22;
+
+  // Thực tập sinh thuộc Khối C và được quản lý bằng phụ cấp ngoài bảng
+  // lương. Tuyệt đối không biến ngày công/hợp đồng thành chi phí lương.
+  if (employee.type === 'TRAINEE') {
+    return {
+      actual_salary: 0,
+      meal_allowance_free: 0,
+      meal_allowance_tax: 0,
+      phone_allowance_free: 0,
+      trans_allowance_tax: 0,
+      taxable_income: 0,
+      assessable_income: 0,
+      ins_salary: 0,
+      social_emp: 0,
+      health_emp: 0,
+      unemp_emp: 0,
+      total_ins_emp: 0,
+      social_comp: 0,
+      health_comp: 0,
+      unemp_comp: 0,
+      union_fund_comp: 0,
+      total_ins_comp: 0,
+      pit_tax: 0,
+      union_fee: 0,
+      net_salary: 0,
+      total_transfer: 0,
+      final_transfer: 0,
+    };
+  }
 
   // 1. Lương thực tế (Col G) & Pro-rated Allowances
   const actual_salary = employee.actual_working_days <= 0

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_admin_user, get_db
 from app.core.auth import get_password_hash
-from app.core.roles import HR_ADMIN, IT_ADMIN, USER
+from app.core.roles import DIRECTOR, HR_ADMIN, IT_ADMIN, USER
 from app.models.employee import Employee
 from app.models.user import User
 from app.services.audit_service import record_audit
@@ -20,7 +20,7 @@ router = APIRouter(
     dependencies=[Depends(get_admin_user)],
 )
 
-ASSIGNABLE_ROLES = {HR_ADMIN, IT_ADMIN, USER}
+ASSIGNABLE_ROLES = {DIRECTOR, HR_ADMIN, IT_ADMIN, USER}
 
 
 class AccessUserPayload(BaseModel):
@@ -61,7 +61,7 @@ def create_access_user(
     if requested_role and requested_role not in ASSIGNABLE_ROLES:
         raise HTTPException(
             status_code=422,
-            detail="Chỉ được cấp vai trò HR_ADMIN, IT_ADMIN hoặc USER tại đây.",
+            detail="Chỉ được cấp vai trò DIRECTOR, HR_ADMIN, IT_ADMIN hoặc USER tại đây.",
         )
     if requested_role and requested_role != role:
         raise HTTPException(

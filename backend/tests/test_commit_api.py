@@ -113,10 +113,9 @@ def test_commit_checkin_profile_flexible_dates(client, seed_basic_employees, db_
     assert data["status"] == "completed"
 
 
-def test_commit_merges_primary_and_secondary_biometric_profiles(client, db_session: Session):
+def test_commit_normalizes_and_merges_single_machine_identifier(client, db_session: Session):
     employee = Employee(
         machine_employee_id="29",
-        biometric_id="42",
         full_name="Nguyễn Thị Thanh Hương",
         department_name="IT",
     )
@@ -135,14 +134,14 @@ def test_commit_merges_primary_and_secondary_biometric_profiles(client, db_sessi
                 "raw_times": "09:07",
             },
             {
-                "machine_employee_id": "＃42",
+                "machine_employee_id": "＃29",
                 "work_date": "2026-07-20",
                 "check_in": "09:32",
                 "check_out": "17:38",
                 "raw_times": "09:32;17:38",
             },
             {
-                "machine_employee_id": "42",
+                "machine_employee_id": "29",
                 "work_date": "2026-07-18",
                 "check_in": "08:10",
                 "check_out": "17:40",

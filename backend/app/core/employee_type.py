@@ -10,7 +10,8 @@ from typing import Final
 FULLTIME: Final = "FULLTIME"
 PROBATION: Final = "PROBATION"
 INTERN: Final = "INTERN"
-VALID_EMPLOYEE_TYPES: Final = {FULLTIME, PROBATION, INTERN}
+TRAINEE: Final = "TRAINEE"
+VALID_EMPLOYEE_TYPES: Final = {FULLTIME, PROBATION, INTERN, TRAINEE}
 
 FULLTIME_ALLOWANCE_DEFAULTS: Final = {
     "meal_allowance": 1_200_000,
@@ -23,7 +24,7 @@ FULLTIME_ALLOWANCE_DEFAULTS: Final = {
 def normalize_employee_type(value: str | None) -> str:
     normalized = str(value or FULLTIME).strip().upper()
     if normalized not in VALID_EMPLOYEE_TYPES:
-        raise ValueError("employee_type must be FULLTIME, PROBATION, or INTERN")
+        raise ValueError("employee_type must be FULLTIME, PROBATION, INTERN, or TRAINEE")
     return normalized
 
 

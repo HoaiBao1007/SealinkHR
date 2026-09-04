@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { DateTimeRangePicker, defaultTimeOffRange } from './DateTimeRangePicker'
 import { BUSINESS_TRAVEL_REQUEST, LEAVE_REQUEST, TimeOffRequestIntent, type LeaveBalance } from './TimeOffRequestIntent'
 import { TimeOffAttachmentUpload, type TimeOffAttachment } from './TimeOffAttachmentUpload'
+import { AppIcon } from '../../shared/ui/AppIcon'
 import './time-off-dashboard-form.css'
 
 type ApiRequest = (path: string, init?: RequestInit) => Promise<Response>
@@ -192,7 +193,7 @@ export function TimeOffDashboardForm({ apiRequest, onOpenWorkspace }: Props) {
         </div>
         <button type="button" className="time-off-dashboard-link" onClick={onOpenWorkspace}>
           Xem lịch & đơn của tôi
-          <span aria-hidden="true">→</span>
+          <AppIcon name="arrow-right" size={15} />
         </button>
       </header>
 

@@ -295,6 +295,7 @@ def _build_text_payslip_pdf(data: dict) -> BytesIO:
         "FULLTIME": "Chính thức",
         "PROBATION": "Thử việc",
         "INTERN": "Học việc",
+        "TRAINEE": "Thực tập",
     }.get(data.get("employee_type"), "Chính thức")
     story.append(paragraph(f"Tài khoản: {data.get('account_number') or 'N/A'} ({data.get('bank_name') or 'N/A'}) | Hợp đồng: {employee_type_label}", small))
     story.extend([Spacer(1, 7), HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CBD5E1")), Spacer(1, 8)])
@@ -368,6 +369,29 @@ def _build_text_payslip_pdf(data: dict) -> BytesIO:
     return buffer
 
 
+def _latest_completed_payroll_period(reference: date | None = None) -> str:
+    """Return the previous calendar month in YYYY-MM format."""
+    current = reference or date.today()
+    previous_month_last_day = current.replace(day=1) - timedelta(days=1)
+    return previous_month_last_day.strftime("%Y-%m")
+
+
+def _order_payslip_periods_for_default(
+    periods: list[str],
+    reference: date | None = None,
+) -> list[str]:
+    """Put the newest issued, completed payroll month first.
+
+    Future/current published rows remain selectable for audit purposes, but
+    they must not become the employee portal's automatic selection.
+    """
+    cutoff = _latest_completed_payroll_period(reference)
+    unique_periods = sorted(set(periods), reverse=True)
+    completed = [period for period in unique_periods if period <= cutoff]
+    current_or_future = [period for period in unique_periods if period > cutoff]
+    return completed + current_or_future
+
+
 @router.get("/my-payslip-periods")
 def get_my_payslip_periods(
     db: Session = Depends(get_db),
@@ -393,7 +417,7 @@ def get_my_payslip_periods(
         .order_by(MonthlySalaryInput.salary_period.desc())
         .all()
     )
-    return [item[0] for item in periods]
+    return _order_payslip_periods_for_default([item[0] for item in periods])
 
 
 @router.get("/my-held-bonus-jobs")
@@ -437,6 +461,8 @@ def get_my_held_bonus_jobs(
             continue
         verification = verifications.get(job.id)
         verification_status = verification.status if verification else "NONE"
+        if verification_status == "CANCELLED":
+            verification_status = "NONE"
         result.append({
             "job_id": job.id,
             "period_id": job.period_id,

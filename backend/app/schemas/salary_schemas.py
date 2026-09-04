@@ -7,7 +7,7 @@ class EmployeeSalaryUpdate(BaseModel):
     fullname: Optional[str] = Field(default=None, max_length=150)
     position: Optional[str] = Field(default=None, max_length=150)
     contract_salary: Optional[int] = Field(default=None, ge=0)
-    employee_type: Optional[Literal["FULLTIME", "PROBATION", "INTERN"]] = None
+    employee_type: Optional[Literal["FULLTIME", "PROBATION", "INTERN", "TRAINEE"]] = None
     dependents_count: Optional[int] = Field(default=None, ge=0)
     account_number: Optional[str] = Field(default=None, max_length=50)
     bank_name: Optional[str] = Field(default=None, max_length=150)
@@ -86,6 +86,7 @@ class MonthlySalaryInputResponse(BaseModel):
     pit_refund: int
     other_deductions: int
     bonus_14: int
+    is_published: bool = False
     # Commission wallet entries may retain a fractional VND remainder after
     # proportional JOB allocation. Keep two decimals end-to-end; truncating at
     # this response layer creates a mismatch with the immutable ledger.

@@ -15,6 +15,10 @@ from app.models.department import Department
 from app.models.monthly_salary_input import MonthlySalaryInput
 from app.models.salary_policy import SalaryPolicy
 from app.services.salary_policy import ensure_default_salary_policy, policy_to_dict, resolve_salary_policy
+from app.services.employee_visibility import (
+    salary_period_working_employee_ids,
+    should_include_employee_in_salary_period,
+)
 
 
 def resolve_export_salary_policy(db: Session, period: str) -> dict:
@@ -31,6 +35,7 @@ def resolve_export_salary_policy(db: Session, period: str) -> dict:
             MonthlySalaryInput.salary_policy_id.is_not(None),
         )
         .order_by(MonthlySalaryInput.id.asc())
+        .limit(1)
         .scalar()
     )
     policy = db.get(SalaryPolicy, snapshot_id) if snapshot_id else None
@@ -108,6 +113,34 @@ def cake_salary(employee: dict, salary_policy: Optional[dict] = None) -> dict:
     pit_refund = employee.get("pit_refund", 0)
     advance_payment = employee.get("advance_payment", 0)
     emp_type = employee.get("type", "FULLTIME")
+
+    # TRAINEE is Khối C: stipend tracking is outside payroll. Keep every
+    # salary/cost/transfer field at zero even if legacy salary inputs exist.
+    if emp_type == "TRAINEE":
+        return {
+            "actual_salary": 0,
+            "meal_allowance_free": 0,
+            "meal_allowance_tax": 0,
+            "phone_allowance_free": 0,
+            "trans_allowance_tax": 0,
+            "taxable_income": 0,
+            "assessable_income": 0,
+            "ins_salary": 0,
+            "social_emp": 0,
+            "health_emp": 0,
+            "unemp_emp": 0,
+            "total_ins_emp": 0,
+            "social_comp": 0,
+            "health_comp": 0,
+            "unemp_comp": 0,
+            "union_fund_comp": 0,
+            "total_ins_comp": 0,
+            "pit_tax": 0,
+            "union_fee": 0,
+            "net_salary": 0,
+            "total_transfer": 0,
+            "final_transfer": 0,
+        }
 
     # 1. Mức lương thực trong tháng / Actual Salary (Col 7) & Pro-rated Allowances
     if actual_working_days <= 0:
@@ -375,31 +408,12 @@ def export_salary_report(db: Session, period: str) -> BytesIO:
         (MonthlySalaryInput.employee_id == Employee.id) & (MonthlySalaryInput.salary_period == period)
     ).order_by(Employee.id.asc()).all()
 
-    # Python filtering
-    filtered_results = []
-    for emp, m_input in results:
-        # If there's an input record, always keep it
-        if m_input is not None:
-            filtered_results.append((emp, m_input))
-            continue
-            
-        # Filter by start date
-        if emp.start_date:
-            start_period = emp.start_date.strftime("%Y-%m")
-            if start_period > period:
-                continue
-                
-        # Filter by resignation period
-        if emp.status == 'RESIGNED':
-            if emp.resignation_period:
-                if emp.resignation_period <= period:
-                    continue
-            else:
-                continue
-        elif emp.status == 'LOCKED':
-            continue
-
-        filtered_results.append((emp, m_input))
+    working_employee_ids = salary_period_working_employee_ids(db, period)
+    filtered_results = [
+        (employee, monthly_input)
+        for employee, monthly_input in results
+        if should_include_employee_in_salary_period(employee, period, working_employee_ids)
+    ]
 
     # 2. Partition
     def get_resolved_type(emp, m_input):
@@ -411,6 +425,10 @@ def export_salary_report(db: Session, period: str) -> BytesIO:
     probation_emps = [
         pair for pair in filtered_results
         if get_resolved_type(pair[0], pair[1]) in {"PROBATION", "INTERN"}
+    ]
+    trainee_emps = [
+        pair for pair in filtered_results
+        if get_resolved_type(pair[0], pair[1]) == "TRAINEE"
     ]
 
     # Load template relative to this file's location
@@ -552,7 +570,7 @@ def export_salary_report(db: Session, period: str) -> BytesIO:
     
     # Write Group B Title Row
     r_title_b = row_cursor
-    ws_salary.cell(row=r_title_b, column=1, value="B. NHÂN VIÊN THỬ VIỆC + HỌC VIỆC / PROBATIONARY+ APPRENTICE STAFF - THUẾ 10%")
+    ws_salary.cell(row=r_title_b, column=1, value="B. NHÂN VIÊN THỬ VIỆC + HỌC VIỆC / PROBATIONARY STAFF - THUẾ 10%")
     ws_salary.merge_cells(start_row=r_title_b, start_column=1, end_row=r_title_b, end_column=27)
     ws_salary.cell(row=r_title_b, column=28, value="Thuế suất\nTax rate")
     ws_salary.cell(row=r_title_b, column=29, value=0.1)
@@ -646,6 +664,39 @@ def export_salary_report(db: Session, period: str) -> BytesIO:
             ws_salary.cell(row=r_sub_b, column=c, value=0)
             
     row_cursor += 1
+
+    # Khối C is a roster-only section. Stipends for trainees are managed
+    # outside payroll, so no salary, tax, insurance or transfer values are
+    # written and this section is excluded from every subtotal/grand total.
+    r_title_c = row_cursor
+    ws_salary.cell(
+        row=r_title_c,
+        column=1,
+        value="C. THỰC TẬP SINH (TTS) / TRAINEES - KHÔNG TÍNH VÀO BẢNG LƯƠNG",
+    )
+    ws_salary.merge_cells(start_row=r_title_c, start_column=1, end_row=r_title_c, end_column=35)
+    apply_row_styles(ws_salary, r_title_c, style_probation_header)
+    row_cursor += 1
+
+    for stt_c, (emp, input_rec) in enumerate(trainee_emps, 1):
+        fields = get_monthly_input_fields(emp, input_rec, period)
+        ws_salary.cell(row=row_cursor, column=1, value=stt_c)
+        ws_salary.cell(row=row_cursor, column=2, value=fields["actual_days"])
+        ws_salary.cell(row=row_cursor, column=3, value=fields["fullname"])
+        ws_salary.cell(row=row_cursor, column=4, value="")
+        ws_salary.cell(row=row_cursor, column=5, value=fields["position"] or "")
+        ws_salary.cell(
+            row=row_cursor,
+            column=6,
+            value="Theo dõi phụ cấp TTS ngoài bảng lương - không nhập số tiền tại đây",
+        )
+        ws_salary.merge_cells(start_row=row_cursor, start_column=6, end_row=row_cursor, end_column=35)
+        apply_row_styles(ws_salary, row_cursor, style_probation_data)
+        ws_salary.cell(row=row_cursor, column=3).font = openpyxl.styles.Font(
+            name="Times New Roman", size=15, color="FF7030A0"
+        )
+        ws_salary.cell(row=row_cursor, column=6).alignment = openpyxl.styles.Alignment(horizontal="left")
+        row_cursor += 1
     
     # Empty Row
     row_cursor += 1
@@ -743,6 +794,7 @@ def export_salary_report(db: Session, period: str) -> BytesIO:
     # Clear all data starting from row 6
     ws_bank.delete_rows(6, ws_bank.max_row - 5 + 5)
 
+    # Khối C is intentionally absent from salary transfer sheets.
     all_active_emps = fulltime_emps + probation_emps
     bank_cursor = 6
     
@@ -959,23 +1011,37 @@ def get_active_department_rules(db: Session, department_id: Optional[int], perio
             
     return [dict(rule) for rule in DEFAULT_BONUS_RULES]
 
-def calculateDynamicSalesBonus(gross_profit: float, employee_salary: float, rules: list = None) -> dict:
+def calculateDynamicSalesBonus(
+    gross_profit: float,
+    employee_salary: float,
+    rules: list = None,
+    target_override: float | None = None,
+) -> dict:
     """
     Calculates Sales Bonus with dynamic progressive tiers based on Target:
-    - Bước 1: Tính Net Profit = Gross_Profit * 0.95
+    - Bước 1: Tính Profit Sale = tổng Profit/Loss của kỳ * 95%
     - Bước 2: Tính Target = Employee_Salary * base_coef
-    - Bước 3: Tính phần lũy tiến ban đầu PF_COUNT_BN = Net_Profit - Target
+    - Bước 3: Tính phần chênh lệch = Profit/Loss - Target
       (Nếu <= 0, Bonus = 0)
-    - Bước 4: Lũy tiến phần PF_COUNT_BN theo các mốc từ rules
+    - Bước 4: Lũy tiến phần chênh lệch theo các mốc từ rules
+
+    ``coefficient`` is the legacy reference Level (Profit Sale / Salary).
+    ``bonus_rate`` remains the effective progressive rate so the result is
+    auditable as Total Bonus = max(0, Profit Sale - Target) * bonus_rate.
     """
     if rules is None:
         rules = DEFAULT_BONUS_RULES
 
-    net_profit = gross_profit * 0.95
+    profit_loss = float(gross_profit or 0.0) * 0.95
+    explicit_target = (
+        max(0.0, float(target_override))
+        if target_override is not None
+        else None
+    )
     if employee_salary <= 0:
         return {
-            "net_profit": round(net_profit, 2),
-            "target": 0.0,
+            "net_profit": round(profit_loss, 2),
+            "target": round(explicit_target or 0.0, 2),
             "pf_count_bn": 0.0,
             "profit_count_bonus": 0.0,
             "bonus_rate": 0.0,
@@ -988,13 +1054,12 @@ def calculateDynamicSalesBonus(gross_profit: float, employee_salary: float, rule
     base_rule = sorted_rules[0]
     base_coef = base_rule["max"]
     
-    target = employee_salary * base_coef
-    pf_count_bn = net_profit - target
-    
-    coef = round(net_profit / employee_salary, 2)
+    target = explicit_target if explicit_target is not None else employee_salary * base_coef
+    pf_count_bn = profit_loss - target
     
     total_bonus_quarter = 0.0
     effective_rate = 0.0
+    reference_coefficient = round(profit_loss / employee_salary, 2) if pf_count_bn > 0 else 0.0
     
     if pf_count_bn > 0:
         remaining = pf_count_bn
@@ -1022,14 +1087,14 @@ def calculateDynamicSalesBonus(gross_profit: float, employee_salary: float, rule
     bonus_per_month = total_bonus_quarter / 3.0
     
     return {
-        "net_profit": round(net_profit, 2),
+        "net_profit": round(profit_loss, 2),
         "target": round(target, 2),
         "pf_count_bn": round(pf_count_bn, 2) if pf_count_bn > 0 else 0.0,
         "profit_count_bonus": round(pf_count_bn, 2) if pf_count_bn > 0 else 0.0,
         "bonus_rate": round(effective_rate, 4),
         "total_bonus_quarter": round(total_bonus_quarter, 2),
         "bonus_per_month": round(bonus_per_month, 2),
-        "coefficient": coef
+        "coefficient": reference_coefficient
     }
 
 
@@ -1038,24 +1103,35 @@ def calculate_employee_bonus(
     employee_salary: float,
     rules: list = None,
     uses_progressive_bonus: bool = True,
+    target_override: float | None = None,
 ) -> dict:
     """Keep the existing SALE calculation and apply one fixed tier elsewhere."""
     if uses_progressive_bonus:
-        return calculateDynamicSalesBonus(gross_profit, employee_salary, rules)
+        return calculateDynamicSalesBonus(
+            gross_profit,
+            employee_salary,
+            rules,
+            target_override=target_override,
+        )
 
-    net_profit = gross_profit * 0.95
-    eligible_profit = max(net_profit, 0.0)
-    total_bonus_quarter = eligible_profit * FIXED_NON_SALES_BONUS_RATE
-    coefficient = round(net_profit / employee_salary, 2) if employee_salary > 0 else 0.0
+    profit_loss = float(gross_profit or 0.0) * 0.95
+    target = (
+        max(0.0, float(target_override))
+        if target_override is not None
+        else max(0.0, float(employee_salary or 0.0) * 2.0)
+    )
+    eligible_profit = max(0.0, profit_loss - target)
+    bonus_rate = FIXED_NON_SALES_BONUS_RATE if eligible_profit > 0 else 0.0
+    total_bonus_quarter = eligible_profit * bonus_rate
     return {
-        "net_profit": round(net_profit, 2),
-        "target": 0.0,
+        "net_profit": round(profit_loss, 2),
+        "target": round(target, 2),
         "pf_count_bn": round(eligible_profit, 2),
         "profit_count_bonus": round(eligible_profit, 2),
-        "bonus_rate": FIXED_NON_SALES_BONUS_RATE,
+        "bonus_rate": bonus_rate,
         "total_bonus_quarter": round(total_bonus_quarter, 2),
         "bonus_per_month": round(total_bonus_quarter / 3.0, 2),
-        "coefficient": coefficient,
+        "coefficient": round(profit_loss / employee_salary, 2) if employee_salary > 0 and eligible_profit > 0 else 0.0,
     }
 
 
@@ -1219,46 +1295,51 @@ def get_sales_bonus_for_employee_period(db: Session, employee_id: int, period: s
         period_bonus = 0.0
         
         if emp_ov:
-            # If override exists, apply override values where present
-            if emp_ov.override_monthly_bonus is not None:
+            pnl = emp_ov.override_profit_loss if emp_ov.override_profit_loss is not None else gross_profit
+            target = (
+                emp_ov.override_target
+                if emp_ov.override_target is not None
+                else float(employee.contract_salary or 0.0) * 2.0
+            )
+            profit_sale = float(pnl or 0.0) * 0.95
+            eligible_profit = max(0.0, profit_sale - target)
+
+            # The target gate always wins, including over historical manual
+            # bonus values that are no longer eligible.
+            if eligible_profit <= 0:
+                period_bonus = 0.0
+            elif emp_ov.override_monthly_bonus is not None:
                 period_bonus = emp_ov.override_monthly_bonus
             elif emp_ov.override_total_bonus is not None:
                 period_bonus = emp_ov.override_total_bonus / 3.0
             else:
-                # Need to recalculate based on pnl, target, and rate overrides
-                pnl = emp_ov.override_profit_loss if emp_ov.override_profit_loss is not None else gross_profit
                 if not uses_progressive_bonus:
                     bonus_rate = (
                         emp_ov.override_bonus_rate
                         if emp_ov.override_bonus_rate is not None
                         else FIXED_NON_SALES_BONUS_RATE
                     )
-                    period_bonus = (max(pnl * 0.95, 0.0) * bonus_rate) / 3.0
+                    period_bonus = (eligible_profit * bonus_rate) / 3.0
                 else:
-                    net_profit = pnl * 0.95
-                    target = emp_ov.override_target if emp_ov.override_target is not None else (float(employee.contract_salary or 0.0) * 2.0)
-                    pf_count_bn = net_profit - target
-                    if pf_count_bn <= 0:
-                        period_bonus = 0.0
+                    if emp_ov.override_bonus_rate is not None:
+                        bonus_rate = emp_ov.override_bonus_rate
+                        period_bonus = (eligible_profit * bonus_rate) / 3.0
                     else:
-                        if emp_ov.override_bonus_rate is not None:
-                            bonus_rate = emp_ov.override_bonus_rate
+                        salary = float(employee.contract_salary or 0.0)
+                        if salary <= 0.0:
+                            salary = target / 2.0
+                        if salary > 0.0:
+                            bonus_dept_id = int(employee.bonus_coefficient) if employee.bonus_coefficient and float(employee.bonus_coefficient) > 0 else employee.department_id
+                            rules = get_active_department_rules(db, bonus_dept_id, period)
+                            bonus_result = calculateDynamicSalesBonus(
+                                pnl,
+                                salary,
+                                rules,
+                                target_override=target,
+                            )
+                            period_bonus = float(bonus_result["bonus_per_month"] or 0.0)
                         else:
-                            salary = float(employee.contract_salary or 0.0)
-                            if salary <= 0.0:
-                                salary = target / 2.0
-                            if salary > 0.0:
-                                coef = round(net_profit / salary, 2)
-                                bonus_dept_id = int(employee.bonus_coefficient) if employee.bonus_coefficient and float(employee.bonus_coefficient) > 0 else employee.department_id
-                                rules = get_active_department_rules(db, bonus_dept_id, period)
-                                bonus_rate = 0.0
-                                for rule in sorted(rules, key=lambda x: x["min"]):
-                                    if rule["min"] <= coef <= rule["max"]:
-                                        bonus_rate = rule["rate"]
-                                        break
-                            else:
-                                bonus_rate = 0.0
-                        period_bonus = (pf_count_bn * bonus_rate) / 3.0
+                            period_bonus = 0.0
         else:
             # Fallback to normal calculations from jobs
             if gross_profit > 0:
@@ -1289,6 +1370,48 @@ def _wallet_payout_months(commission_period) -> list[str]:
         month = 1 if month == 12 else month + 1
         months.append(f"{year:04d}-{month:02d}")
     return months
+
+
+def _active_job_release_schedule_ids(db: Session) -> set[int]:
+    """Return active schedules that add released JOB hold to selected months.
+
+    Verified Sales requests identify these schedules through
+    ``payment_verification_id``. Administrative NO -> YES corrections use an
+    immutable wallet reason code instead. Both flows represent additional
+    bonus only for their selected payroll month or months.
+    """
+    from app.models.commission import CommissionPayoutSchedule, CommissionWalletLedger
+
+    verified_ids = {
+        row.id for row in db.query(CommissionPayoutSchedule.id).filter(
+            CommissionPayoutSchedule.payment_verification_id.is_not(None),
+            CommissionPayoutSchedule.status.in_({"SCHEDULED", "PAID"}),
+        ).all()
+    }
+    manual_ids = {
+        row.schedule_id for row in db.query(CommissionWalletLedger.schedule_id).join(
+            CommissionPayoutSchedule,
+            CommissionPayoutSchedule.id == CommissionWalletLedger.schedule_id,
+        ).filter(
+            CommissionWalletLedger.entry_type == "SCHEDULED",
+            CommissionWalletLedger.reason_code.in_([
+                "MANUAL_PAYMENT_SPLIT",
+                "MANUAL_PAYMENT_MONTH_RELEASE",
+                "MANUAL_PAYMENT_SELECTED_MONTHS",
+            ]),
+            CommissionPayoutSchedule.status.in_({"SCHEDULED", "PAID"}),
+        ).all()
+        if row.schedule_id is not None
+    }
+    return verified_ids | manual_ids
+
+
+def _job_policy_hold_for_monthly_base(job) -> float:
+    """Freeze the original base payout when a held JOB is later released."""
+    current_hold = max(0.0, float(job.hold_bonus_amount or 0.0))
+    if current_hold > 0.005 or not job.held_release_payout_period:
+        return current_hold
+    return round(max(0.0, float(job.profit_loss or 0.0)) * 0.30, 2)
 
 
 def _wallet_position_amounts(entries) -> dict:
@@ -1323,14 +1446,50 @@ def _wallet_position_amounts(entries) -> dict:
     }
 
 
+def _company_monthly_commission_payout(
+    db: Session,
+    employee: Employee,
+    source_period,
+    *,
+    quarter_total: float,
+    monthly_base: float,
+) -> float:
+    """Return the payable monthly amount after applying the Profit hold rule."""
+    from app.models.commission import CommissionJob, CommissionRepOverride
+    from app.services.commission_wallet_rules import calculate_company_bonus_wallet
+
+    employee_name = clean_name_for_match(employee.full_name)
+    jobs = [
+        job for job in db.query(CommissionJob).filter(CommissionJob.period_id == source_period.id).all()
+        if clean_name_for_match(job.sales_rep) == employee_name
+    ]
+    total_profit_loss = sum(float(job.profit_loss or 0.0) for job in jobs)
+    policy_hold = sum(_job_policy_hold_for_monthly_base(job) for job in jobs)
+    override = next((
+        row for row in db.query(CommissionRepOverride).filter(
+            CommissionRepOverride.period_id == source_period.id,
+        ).all()
+        if clean_name_for_match(row.sales_rep) == employee_name
+    ), None)
+    if override and override.override_profit_loss is not None:
+        total_profit_loss = float(override.override_profit_loss)
+
+    rule = calculate_company_bonus_wallet(
+        total_profit_loss=total_profit_loss,
+        total_bonus_quarter=quarter_total,
+        monthly_bonus=monthly_base,
+        policy_hold_amount=policy_hold,
+    )
+    return float(rule["monthly_payout"])
+
+
 def get_wallet_sales_bonus_for_employee_period(db: Session, employee: Employee, period: str) -> Optional[float]:
     """Return the monthly salary commission derived from the wallet.
 
     A commission quarter creates *three* monthly entitlement amounts.  Its
-    calculated monthly amount is therefore the base for every following
-    payroll month (for example Q2 -> July, August and September).  Ledger
-    adjustments are applied only to their selected payroll month.  This avoids
-    the old error where the whole three-month bonus was placed in July.
+    calculated monthly amount is the base for every following payroll month.
+    The company Profit-hold rule is then applied; any withheld bonus remains in
+    the temporary wallet and is paid only after an explicit transfer/schedule.
     """
     from app.models.commission import CommissionCalculationSnapshot, CommissionPeriod, CommissionWalletLedger, CommissionPayoutSchedule
 
@@ -1347,12 +1506,7 @@ def get_wallet_sales_bonus_for_employee_period(db: Session, employee: Employee, 
     # moves a previously-held amount from its source quarter to a future
     # commission cycle. Only these schedules are added to their target payroll
     # month; generic schedules merely reserve an already-available amount.
-    active_command_schedule_ids = {
-        row.id for row in db.query(CommissionPayoutSchedule.id).filter(
-            CommissionPayoutSchedule.payment_verification_id.is_not(None),
-            CommissionPayoutSchedule.status.in_({"SCHEDULED", "PAID"}),
-        ).all()
-    }
+    active_command_schedule_ids = _active_job_release_schedule_ids(db)
 
     positions: dict[tuple[int, Optional[int], str], list] = {}
     for entry in entries:
@@ -1393,34 +1547,15 @@ def get_wallet_sales_bonus_for_employee_period(db: Session, employee: Employee, 
             regular_month = round(quarter_total / 3, 2)
             monthly_base = regular_month if payout_index < 2 else round(quarter_total - regular_month * 2, 2)
         else:
+            quarter_total = round(period_position["calculation_earned"], 2)
             monthly_base = period_position["calculation_earned"]
-        # The calculated amount is a monthly entitlement. A Payment Received
-        # hold belongs to the source quarter and is distributed precisely over
-        # its three payroll months. When it has a future release allocation,
-        # use the original held source amount; otherwise use the current
-        # unpaid hold balance (important for legacy records and YES -> NO).
-        result += monthly_base
-        source_hold = 0.0
-        for position_entries in period_positions:
-            amounts = _wallet_position_amounts(position_entries)
-            release_allocated = sum(
-                float(entry.amount or 0.0)
-                for entry in position_entries
-                if entry.entry_type in {"PAYMENT_RELEASE_ALLOCATION", "PAYMENT_RELEASE_REVERSAL"}
-            )
-            command_scheduled = sum(
-                float(entry.amount or 0.0)
-                for entry in position_entries
-                if entry.entry_type == "SCHEDULED" and entry.schedule_id in active_command_schedule_ids
-            )
-            # Current unpaid hold plus the still-active future release plan
-            # equals the one source hold that must be spread across this
-            # quarter. This remains correct after YES -> NO -> YES changes.
-            source_hold += amounts["automatic_held"] + max(0.0, round(release_allocated, 2)) + max(0.0, round(command_scheduled, 2))
-        source_hold = round(source_hold, 2)
-        hold_parts = [round(source_hold / 3, 2), round(source_hold / 3, 2)]
-        hold_parts.append(round(source_hold - hold_parts[0] - hold_parts[1], 2))
-        result -= hold_parts[payout_index]
+        result += _company_monthly_commission_payout(
+            db,
+            employee,
+            source_period,
+            quarter_total=quarter_total,
+            monthly_base=monthly_base,
+        )
         default_adjustment_month = payout_months[0]
         for entry in (entry for position_entries in period_positions for entry in position_entries):
             if entry.entry_type not in month_adjustment_types:
@@ -1466,7 +1601,7 @@ def get_wallet_sales_bonus_for_employee_period(db: Session, employee: Employee, 
     if command_payout:
         has_wallet_data_for_month = True
         result += command_payout
-    return round(result, 2) if has_wallet_data_for_month else None
+    return max(0.0, round(result, 2)) if has_wallet_data_for_month else None
 
 
 def _wallet_source_bonus_for_month(
@@ -1503,20 +1638,16 @@ def _wallet_source_bonus_for_month(
         regular_month = round(quarter_total / 3, 2)
         result = regular_month if payout_index < 2 else round(quarter_total - regular_month * 2, 2)
     else:
+        quarter_total = round(period_position["calculation_earned"], 2)
         result = period_position["calculation_earned"]
 
-    source_hold = 0.0
-    for position_entries in period_positions:
-        amounts = _wallet_position_amounts(position_entries)
-        release_allocated = sum(
-            float(entry.amount or 0.0)
-            for entry in position_entries
-            if entry.entry_type in {"PAYMENT_RELEASE_ALLOCATION", "PAYMENT_RELEASE_REVERSAL"}
-        )
-        source_hold += amounts["automatic_held"] + max(0.0, round(release_allocated, 2))
-    hold_parts = [round(source_hold / 3, 2), round(source_hold / 3, 2)]
-    hold_parts.append(round(source_hold - hold_parts[0] - hold_parts[1], 2))
-    result -= hold_parts[payout_index]
+    result = _company_monthly_commission_payout(
+        db,
+        employee,
+        source_period,
+        quarter_total=quarter_total,
+        monthly_base=result,
+    )
 
     adjustment_types = {"MANUAL_CREDIT", "MANUAL_DECREASE", "MANUAL_HOLD", "MANUAL_RELEASE", "TRANSFER_OUT"}
     default_adjustment_month = payout_months[0]
@@ -1527,16 +1658,16 @@ def _wallet_source_bonus_for_month(
             continue
         amount = float(entry.amount or 0.0)
         result += -abs(amount) if entry.entry_type == "MANUAL_HOLD" else abs(amount) if entry.entry_type == "MANUAL_RELEASE" else amount
-    return round(result, 2)
+    return max(0.0, round(result, 2))
 
 
 def get_commission_payslip_summary(db: Session, employee: Employee, payout_period: str) -> dict:
     """Return a transparent, read-only commission breakdown for a payslip.
 
     ``remaining_bonus`` means the planned amount in the *later months* of the
-    same three-month payout cycle. Jobs with Payment Received other than YES
-    are listed separately, with the ledger amount currently waiting for the
-    customer payment condition.
+    same three-month payout cycle. JOBs with an automatic Hold Bonus balance
+    are listed separately, regardless of Payment Received, because the fixed
+    30% policy is independent from receivable evidence.
     """
     from app.models.commission import CommissionCalculationSnapshot, CommissionJob, CommissionPeriod, CommissionPayoutSchedule, CommissionWalletLedger
 
@@ -1559,11 +1690,11 @@ def get_commission_payslip_summary(db: Session, employee: Employee, payout_perio
     # held JOB.  Keep the accountant's note with the target payslip month so
     # the employee can see both the amount and its source without altering any
     # salary calculation.
+    active_release_schedule_ids = _active_job_release_schedule_ids(db)
     active_command_schedules = {
         item.id: item
         for item in db.query(CommissionPayoutSchedule).filter(
-            CommissionPayoutSchedule.payment_verification_id.is_not(None),
-            CommissionPayoutSchedule.status.in_({"SCHEDULED", "PAID"}),
+            CommissionPayoutSchedule.id.in_(active_release_schedule_ids),
         ).all()
     }
     scheduled_job_payouts: list[dict] = []
@@ -1617,27 +1748,27 @@ def get_commission_payslip_summary(db: Session, employee: Employee, payout_perio
             "period_label": source_period.period_label,
             "payout_periods": payout_months,
             "total_bonus_quarter": quarter_total,
-            "current_period_bonus": round(regular_current + release_current, 2),
-            "remaining_bonus": round(future_regular + future_releases, 2),
+            "current_period_bonus": max(0.0, round(regular_current + release_current, 2)),
+            "remaining_bonus": max(0.0, round(future_regular + future_releases, 2)),
         })
 
         for job in db.query(CommissionJob).filter(CommissionJob.period_id == period_id).all():
-            if clean_name_for_match(job.sales_rep) != employee_name or str(job.payment_received or "").strip().upper() in {"YES", "Y", "PAID", "TRUE", "1"}:
+            if clean_name_for_match(job.sales_rep) != employee_name:
                 continue
             position_entries = positions.get((period_id, job.id, job.sales_rep or ""), [])
-            job_monthly_bonus = _wallet_position_amounts(position_entries)["calculation_earned"] if position_entries else 0.0
+            held_amount = _wallet_position_amounts(position_entries)["automatic_held"] if position_entries else 0.0
             # A zero-value JOB does not give the employee useful pending-bonus
             # information. Keep it in the immutable ledger, but omit it from
             # the personal payslip list to avoid empty rows.
-            if round(job_monthly_bonus, 2) < 0.005:
+            if round(held_amount, 2) < 0.005:
                 continue
             pending_jobs.append({
                 "period_label": source_period.period_label,
                 "job_no": job.job_no,
                 "customer": job.customer,
                 "payment_received": job.payment_received or "NO",
-                "pending_bonus": round(job_monthly_bonus, 2),
-                "reason": "Chờ khách hàng thanh toán (Payment Received = NO).",
+                "pending_bonus": round(held_amount, 2),
+                "reason": "Hold cố định 30% Profit/Loss dương của JOB.",
             })
 
     actual_current = get_sales_bonus_for_employee_period(db, employee.id, payout_period)
@@ -1645,7 +1776,7 @@ def get_commission_payslip_summary(db: Session, employee: Employee, payout_perio
         "payout_period": payout_period,
         "cycles": cycles,
         "total_bonus_quarter": round(sum(item["total_bonus_quarter"] for item in cycles), 2),
-        "current_period_bonus": round(actual_current, 2),
+        "current_period_bonus": max(0.0, round(actual_current, 2)),
         "remaining_bonus": round(sum(item["remaining_bonus"] for item in cycles), 2),
         "pending_jobs": pending_jobs,
         "pending_bonus_amount": round(sum(item["pending_bonus"] for item in pending_jobs), 2),

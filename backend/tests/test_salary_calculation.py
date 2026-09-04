@@ -101,6 +101,27 @@ def test_salary_calculation_ho_dang_nhat():
     assert result["total_transfer"] == 45000000
     assert result["final_transfer"] == 45000000
 
+
+def test_trainee_is_roster_only_and_never_creates_payroll_cost():
+    result = cake_salary({
+        "type": "TRAINEE",
+        "contract_salary": 10_000_000,
+        "actual_working_days": 22,
+        "standard_working_days": 22,
+        "meal_allowance_free": 1_200_000,
+        "taxable_transport": 2_000_000,
+        "performance_allowance": 3_000_000,
+        "other_allowance": 4_000_000,
+        "bonus": 5_000_000,
+        "bonus_14": 6_000_000,
+        "dependents_count": 0,
+        "other_deductions": 0,
+        "pit_refund": 500_000,
+        "advance_payment": 0,
+    })
+
+    assert set(result.values()) == {0}
+
 def test_salary_calculation_from_excel():
     import os
     import pandas as pd
@@ -245,7 +266,12 @@ def test_calculate_dynamic_sales_bonus():
     assert res["bonus_per_month"] == 5263039.12
 
     # Case 2: PF_COUNT_BN <= 0
-    res_zero = calculateDynamicSalesBonus(100000000.0, 60000000.0) # Net_Profit = 95M, Target = 120M -> PF_COUNT_BN = -25M <= 0
+    res_zero = calculateDynamicSalesBonus(100000000.0, 60000000.0)
+    assert res_zero["target"] == 120000000.0
+    assert res_zero["pf_count_bn"] == 0.0
+    assert res_zero["coefficient"] == 0.0
+    assert res_zero["bonus_rate"] == 0.0
+    assert res_zero["total_bonus_quarter"] == 0.0
     assert res_zero["bonus_per_month"] == 0.0
 
     # Case 3: employee_salary <= 0 (unmatched or no salary profile)
@@ -253,7 +279,7 @@ def test_calculate_dynamic_sales_bonus():
     assert res_no_profile["bonus_per_month"] == 0.0
 
 
-def test_non_sales_bonus_is_always_twenty_percent_of_ninety_five_percent_profit():
+def test_non_sales_bonus_uses_profit_above_target_only():
     from app.services.salary import calculate_employee_bonus
 
     result = calculate_employee_bonus(
@@ -263,11 +289,11 @@ def test_non_sales_bonus_is_always_twenty_percent_of_ninety_five_percent_profit(
     )
 
     assert result["net_profit"] == 950_000_000.0
-    assert result["target"] == 0.0
-    assert result["pf_count_bn"] == 950_000_000.0
+    assert result["target"] == 40_000_000.0
+    assert result["pf_count_bn"] == 910_000_000.0
     assert result["bonus_rate"] == 0.20
-    assert result["total_bonus_quarter"] == 190_000_000.0
-    assert result["bonus_per_month"] == 63_333_333.33
+    assert result["total_bonus_quarter"] == 182_000_000.0
+    assert result["bonus_per_month"] == pytest.approx(60_666_666.67, abs=0.01)
 
 
 def test_sales_bonus_wrapper_preserves_existing_progressive_formula():
@@ -336,9 +362,8 @@ def test_get_sales_bonus_for_employee_period(db_session):
     # Q1 payouts are in month 4, 5, 6. Let's query for payout period "2026-05" (May 2026)
     bonus = get_sales_bonus_for_employee_period(db_session, employee.id, "2026-05")
     # Gross profit = 100M
-    # Net profit = 95M
     # Target = 100M (contract_salary * 2)
-    # pf_count_bn = 95M - 100M = -5M <= 0 -> bonus = 0
+    # Profit/Loss does not exceed Target -> coefficient and bonus are 0
     assert bonus == 0.0
     
     # 5. Create override for target to make it 50M, and update job profit_loss to 150M so coef = 2.85 (>2.0)
@@ -354,13 +379,10 @@ def test_get_sales_bonus_for_employee_period(db_session):
     db_session.commit()
     
     bonus_with_target_ov = get_sales_bonus_for_employee_period(db_session, employee.id, "2026-05")
-    # Net profit = 142.5M
     # Overridden Target = 50M
-    # pf_count_bn = 142.5M - 50M = 92.5M > 0
-    # coef = 142.5M / 50M = 2.85 -> bonus_rate = 25% = 0.25
-    # total_bonus = 92.5M * 0.25 = 23.125M
-    # monthly_bonus = 23.125M / 3 = 7,708,333.33
-    assert abs(bonus_with_target_ov - 7708333.33) < 1.0
+    # Profit Sale = 150M * 95% = 142.5M; Difference = 92.5M.
+    # Total = 25M*20% + 25M*25% + 42.5M*30% = 24M; monthly = 8M.
+    assert abs(bonus_with_target_ov - 8000000.0) < 1.0
     
     # 6. Override total bonus directly to 15M
     override.override_total_bonus = 15000000.0
@@ -442,7 +464,7 @@ def test_salary_sales_bonus_reads_wallet_adjustments_and_transfers(db_session):
     assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-09") == 1_000_000.0
 
 
-def test_quarterly_wallet_hold_is_not_multiplied_across_three_payroll_months(db_session):
+def test_quarterly_wallet_hold_does_not_reduce_salary_bonus(db_session):
     from datetime import date as date_type
     from app.models.employee import Employee
     from app.models.commission import CommissionPeriod, CommissionWalletLedger
@@ -461,8 +483,8 @@ def test_quarterly_wallet_hold_is_not_multiplied_across_three_payroll_months(db_
     )
     db_session.add_all([employee, source_period])
     db_session.flush()
-    # One JOB is held for the source quarter. The 900 is distributed evenly
-    # across July, August and September instead of being deducted three times.
+    # Hold belongs to the wallet only; salary receives the monthly entitlement
+    # directly without dividing or subtracting that hold.
     db_session.add(CommissionWalletLedger(
         period_id=source_period.id,
         sales_rep=employee.full_name,
@@ -472,9 +494,51 @@ def test_quarterly_wallet_hold_is_not_multiplied_across_three_payroll_months(db_
     ))
     db_session.commit()
 
-    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-07") == 600.0
-    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-08") == 600.0
-    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-09") == 600.0
+    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-07") == 900.0
+    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-08") == 900.0
+    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-09") == 900.0
+
+
+def test_wallet_sales_bonus_never_returns_a_negative_salary_amount(db_session):
+    from datetime import date as date_type
+    from app.models.employee import Employee
+    from app.models.commission import CommissionPeriod, CommissionWalletLedger
+    from app.services.salary import get_sales_bonus_for_employee_period
+
+    employee = Employee(
+        full_name="NGUYEN NON NEGATIVE BONUS",
+        contract_salary=20_000_000.0,
+        employee_type="FULLTIME",
+        machine_employee_id="wallet-non-negative-001",
+    )
+    source_period = CommissionPeriod(
+        period_label="Q2-2026",
+        from_date=date_type(2026, 4, 1),
+        till_date=date_type(2026, 6, 30),
+    )
+    db_session.add_all([employee, source_period])
+    db_session.flush()
+    db_session.add_all([
+        CommissionWalletLedger(
+            period_id=source_period.id,
+            sales_rep=employee.full_name,
+            employee_id=employee.id,
+            entry_type="ACCRUAL_AVAILABLE",
+            amount=1_000,
+        ),
+        CommissionWalletLedger(
+            period_id=source_period.id,
+            sales_rep=employee.full_name,
+            employee_id=employee.id,
+            entry_type="MANUAL_DECREASE",
+            amount=-2_000,
+            payout_period="2026-07",
+        ),
+    ])
+    db_session.commit()
+
+    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-07") == 0.0
+    assert get_sales_bonus_for_employee_period(db_session, employee.id, "2026-08") == 1_000.0
 
 
 def test_wallet_monthly_split_reconciles_exactly_to_the_source_quarter(db_session):

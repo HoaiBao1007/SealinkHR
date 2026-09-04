@@ -3,8 +3,9 @@ import type { ReactNode, ReactElement } from 'react'
 import logoSealink from '../../assets/LOGO SEALINK.jpg'
 import { NotificationWidget } from '../notifications/NotificationWidget'
 import type { NotificationItem } from '../notifications/NotificationWidget'
+import { AppIcon } from '../../shared/ui/AppIcon'
 
-export type EnterpriseShellIcon = 'dashboard' | 'upload' | 'employees' | 'departments' | 'timesheets' | 'export' | 'salary' | 'commission' | 'settings'
+export type EnterpriseShellIcon = 'dashboard' | 'upload' | 'employees' | 'departments' | 'timesheets' | 'export' | 'salary' | 'commission' | 'functions' | 'settings' | 'leave'
 
 export type EnterpriseShellItem = {
   key: string
@@ -33,24 +34,25 @@ type EnterpriseShellProps = {
 
 // ── Sidebar colour tokens ────────────────────────────────
 const SB = {
-  bg: '#1e91ca',
-  bgTop: '#1e91ca',
-  border: 'rgba(255,255,255,0.15)',
-  itemActive: 'rgba(255,255,255,0.22)',
-  itemHover: 'rgba(255,255,255,0.12)',
-  iconActive: 'rgba(255,255,255,0.3)',
+  bg: '#0879BE',
+  bgTop: '#0879BE',
+  border: 'rgba(255,255,255,0.24)',
+  itemActive: '#ffffff',
+  itemHover: 'rgba(255,255,255,0.08)',
+  iconActive: '#e0f2fe',
   iconDefault: 'rgba(255,255,255,0.12)',
-  label: 'rgba(255,255,255,0.65)',
-  text: 'rgba(255,255,255,0.92)',
-  textActive: '#ffffff',
+  label: '#ffffff',
+  text: '#ffffff',
+  textActive: '#0369a1',
 } as const
 
-const SIDEBAR_W = 252   // expanded width in px
-const TOGGLE_HALF = 13  // half of toggle button width (26px / 2)
+const SIDEBAR_W = 276   // expanded width in px
+const TOGGLE_HALF = 20  // half of the 40px accessible toggle target
+const COMPACT_VIEWPORT_QUERY = '(max-width: 900px)'
 
 // ── Navigation icon ──────────────────────────────────────
 function NavIcon({ name, active }: { name: EnterpriseShellIcon; active: boolean }) {
-  const c = active ? '#ffffff' : 'rgba(255,255,255,0.65)'
+  const c = active ? '#0369a1' : '#ffffff'
   const s = { width: 18, height: 18, color: c } as const
 
   const paths: Record<EnterpriseShellIcon, ReactElement> = {
@@ -85,6 +87,11 @@ function NavIcon({ name, active }: { name: EnterpriseShellIcon; active: boolean 
         <path d="m9 13 1.7 1.7L15.5 10" />
       </svg>
     ),
+    leave: (
+      <svg viewBox="0 0 24 24" fill="none" style={s} stroke="currentColor" strokeWidth="1.8">
+        <path d="M6 3h8l4 4v14H6V3Z" /><path d="M14 3v5h5M9 13h6m-6 4h4" /><path d="m15 18 2 2 4-5" />
+      </svg>
+    ),
     export: (
       <svg viewBox="0 0 24 24" fill="none" style={s} stroke="currentColor" strokeWidth="1.8">
         <path d="M12 4v11" /><path d="m8 11 4 4 4-4" /><path d="M5 18.5h14" />
@@ -101,6 +108,14 @@ function NavIcon({ name, active }: { name: EnterpriseShellIcon; active: boolean 
         <circle cx="9" cy="7" r="2.5" />
         <circle cx="15" cy="17" r="2.5" />
         <line x1="6" y1="20" x2="18" y2="4" />
+      </svg>
+    ),
+    functions: (
+      <svg viewBox="0 0 24 24" fill="none" style={s} stroke="currentColor" strokeWidth="1.8">
+        <rect x="4" y="4" width="6" height="6" rx="1.2" />
+        <rect x="14" y="4" width="6" height="6" rx="1.2" />
+        <rect x="4" y="14" width="6" height="6" rx="1.2" />
+        <rect x="14" y="14" width="6" height="6" rx="1.2" />
       </svg>
     ),
     settings: (
@@ -131,25 +146,60 @@ export function EnterpriseShell({
   headerControls,
   children,
 }: EnterpriseShellProps) {
-  const [collapsed, setCollapsed] = useState(false)
+  const [isCompactViewport, setIsCompactViewport] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia(COMPACT_VIEWPORT_QUERY).matches,
+  )
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia(COMPACT_VIEWPORT_QUERY).matches,
+  )
+  const [myFunctionsOpen, setMyFunctionsOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const activeItem = tabs.find((t) => t.key === activeTab) ?? tabs[0]
-  const settingTabKeys = new Set(['employees', 'departments', 'it-backups', 'it-audit'])
-  const settingTabs = tabs.filter((tab) => settingTabKeys.has(tab.key))
-  const mainTabs = tabs.filter((tab) => !settingTabKeys.has(tab.key))
-  const isSettingActive = settingTabs.some((tab) => tab.key === activeTab)
 
   useEffect(() => {
-    if (isSettingActive) setSettingsOpen(true)
-  }, [isSettingActive])
+    const media = window.matchMedia(COMPACT_VIEWPORT_QUERY)
+    const syncViewport = (matches: boolean) => {
+      setIsCompactViewport(matches)
+      setCollapsed(matches)
+    }
+    const handleChange = (event: MediaQueryListEvent) => syncViewport(event.matches)
+    syncViewport(media.matches)
+    media.addEventListener('change', handleChange)
+    return () => media.removeEventListener('change', handleChange)
+  }, [])
+  const activeItem = tabs.find((t) => t.key === activeTab) ?? tabs[0]
+  const myFunctionTabKeys = new Set(['timesheets', 'export', 'salary'])
+  const hasEmployeeLifecycleHub = tabs.some((tab) => tab.key === 'employees')
+  const settingTabKeys = new Set([
+    'employees', 'departments', 'onboarding', 'it-backups', 'it-audit', 'my-account',
+    ...(hasEmployeeLifecycleHub ? ['offboarding'] : []),
+  ])
+  const myFunctionTabs = tabs.filter((tab) => myFunctionTabKeys.has(tab.key))
+  const settingTabs = tabs.filter((tab) => settingTabKeys.has(tab.key))
+  const visibleSettingTabs = settingTabs.filter((tab) => tab.key !== 'onboarding' && tab.key !== 'offboarding')
+  const shouldGroupMyFunctions = myFunctionTabs.length > 1
+  const primaryNavigation: Array<EnterpriseShellItem | 'my-functions'> = []
+  let myFunctionsInserted = false
+  tabs.forEach((tab) => {
+    if (settingTabKeys.has(tab.key)) return
+    if (shouldGroupMyFunctions && myFunctionTabKeys.has(tab.key)) {
+      if (!myFunctionsInserted) {
+        primaryNavigation.push('my-functions')
+        myFunctionsInserted = true
+      }
+      return
+    }
+    primaryNavigation.push(tab)
+  })
   const roleLabel: Record<string, string> = {
     ADMIN: 'Kế toán trưởng',
+    DIRECTOR: 'GIÁM ĐỐC',
     HR_ADMIN: 'Admin vận hành',
     IT_ADMIN: 'Quản trị hệ thống cấp cao',
     USER: 'Nhân viên',
   }
   const roleDescription: Record<string, string> = {
     ADMIN: 'Toàn quyền kế toán, lương, commission và vận hành hệ thống.',
+    DIRECTOR: 'Toàn quyền nghiệp vụ như Kế toán trưởng.',
     HR_ADMIN: 'Quản lý hồ sơ, phòng ban và bảng công; không truy cập lương hoặc bonus.',
     IT_ADMIN: 'Toàn quyền nghiệp vụ kế toán và quản trị IT, bao gồm Backup và Audit.',
     USER: 'Xem phiếu lương, bảng công và bonus đang giữ của cá nhân.',
@@ -162,16 +212,25 @@ export function EnterpriseShell({
   })()
 
   // Toggle button left position: sits on the right edge of sidebar
-  const toggleLeft = collapsed ? 12 : SIDEBAR_W - TOGGLE_HALF
+  const compactSidebarWidth = 'min(86vw, 276px)'
+  const toggleLeft = collapsed
+    ? 12
+    : isCompactViewport
+      ? `calc(${compactSidebarWidth} - ${TOGGLE_HALF}px)`
+      : SIDEBAR_W - TOGGLE_HALF
 
   const renderNavItem = (tab: EnterpriseShellItem, nested = false) => {
-    const isActive = tab.key === activeTab
+    const isActive = tab.key === activeTab || (tab.key === 'employees' && (activeTab === 'onboarding' || activeTab === 'offboarding'))
     return (
       <button
         key={tab.key}
         type="button"
+        className={`sealink-nav-item${isActive ? ' is-active' : ''}${nested ? ' is-nested' : ''}`}
         aria-current={isActive ? 'page' : undefined}
-        onClick={() => onTabChange(tab.key)}
+        onClick={() => {
+          onTabChange(tab.key)
+          if (isCompactViewport) setCollapsed(true)
+        }}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -187,10 +246,9 @@ export function EnterpriseShell({
           transition: 'background 0.15s',
           textAlign: 'left',
         }}
-        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = SB.itemHover }}
-        onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
       >
         <span
+          className="sealink-nav-icon"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -205,6 +263,7 @@ export function EnterpriseShell({
           <NavIcon name={tab.icon} active={isActive} />
         </span>
         <span
+          className="sealink-nav-label"
           style={{
             fontSize: nested ? 13 : 13.5,
             fontWeight: isActive ? 600 : 400,
@@ -223,28 +282,40 @@ export function EnterpriseShell({
   return (
     // ── App container: full-viewport flexbox row ──────────
     <div
+      className="sealink-app-shell"
       style={{
         display: 'flex',
         flexDirection: 'row',
         width: '100vw',
         height: '100vh',
         overflow: 'hidden',
-        fontFamily: "Roboto, Arial, sans-serif",
+        fontFamily: 'var(--font-sans)',
         background: '#f0f5fb',
       }}
     >
+      {isCompactViewport && !collapsed && (
+        <button
+          type="button"
+          className="sealink-sidebar-backdrop"
+          aria-label="Đóng menu điều hướng"
+          onClick={() => setCollapsed(true)}
+        />
+      )}
+
       {/* ══════════════ FLOATING TOGGLE BUTTON ══════════════ */}
       <button
         type="button"
+        className="sealink-rail-toggle"
         onClick={() => setCollapsed((v) => !v)}
         aria-label={collapsed ? 'Mở rộng sidebar' : 'Thu gọn sidebar'}
+        aria-expanded={!collapsed}
         style={{
           position: 'fixed',
           left: toggleLeft,
           top: 24,
           zIndex: 200,
-          width: 26,
-          height: 26,
+          width: 40,
+          height: 40,
           borderRadius: '50%',
           background: '#1e91ca',
           border: '2.5px solid #ffffff',
@@ -266,8 +337,8 @@ export function EnterpriseShell({
           stroke="currentColor"
           strokeWidth="2.8"
           style={{
-            width: 13,
-            height: 13,
+            width: 17,
+            height: 17,
             transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
           }}
@@ -278,24 +349,29 @@ export function EnterpriseShell({
 
       {/* ══════════════════ SIDEBAR ══════════════════════════ */}
       <aside
-        className={collapsed ? 'collapsed' : ''}
+        className={`sealink-sidebar${collapsed ? ' collapsed' : ''}`}
         style={{
           flexShrink: 0,
-          width: collapsed ? 0 : SIDEBAR_W,
-          minWidth: collapsed ? 0 : SIDEBAR_W,
-          maxWidth: collapsed ? 0 : SIDEBAR_W,
+          width: collapsed ? 0 : isCompactViewport ? compactSidebarWidth : SIDEBAR_W,
+          minWidth: collapsed ? 0 : isCompactViewport ? compactSidebarWidth : SIDEBAR_W,
+          maxWidth: collapsed ? 0 : isCompactViewport ? compactSidebarWidth : SIDEBAR_W,
+          position: isCompactViewport ? 'fixed' : 'relative',
+          inset: isCompactViewport ? '0 auto 0 0' : undefined,
+          zIndex: isCompactViewport ? 190 : undefined,
+          boxShadow: isCompactViewport && !collapsed ? '16px 0 40px rgba(2, 20, 34, 0.28)' : undefined,
           overflow: 'hidden',
           opacity: collapsed ? 0 : 1,
           pointerEvents: collapsed ? 'none' : 'auto',
-          background: `linear-gradient(180deg, ${SB.bgTop} 0%, ${SB.bg} 100%)`,
+          background: SB.bg,
           borderRight: collapsed ? 'none' : `1px solid ${SB.border}`,
           transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1), min-width 0.3s cubic-bezier(0.4,0,0.2,1), max-width 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s cubic-bezier(0.4,0,0.2,1)',
         }}
       >
         {/* Inner: fixed-width scroll container (does NOT shrink) */}
         <div
+          className="sealink-rail-inner"
           style={{
-            width: SIDEBAR_W,
+            width: isCompactViewport ? compactSidebarWidth : SIDEBAR_W,
             height: '100vh',
             display: 'flex',
             flexDirection: 'column',
@@ -310,6 +386,7 @@ export function EnterpriseShell({
         >
           {/* Logo */}
           <div
+            className="sealink-rail-brand"
             style={{
               padding: '20px 16px 14px',
               borderBottom: `1px solid ${SB.border}`,
@@ -318,6 +395,7 @@ export function EnterpriseShell({
             }}
           >
             <div
+              className="sealink-rail-logo"
               style={{
                 background: '#ffffff',
                 borderRadius: 12,
@@ -339,11 +417,12 @@ export function EnterpriseShell({
           </div>
 
           {/* Nav section */}
-          <div style={{ padding: '14px 12px', flex: 1 }}>
+          <div className="sealink-rail-menu" style={{ padding: '14px 12px', flex: 1 }}>
             <p
+              className="sealink-rail-label"
               style={{
                 margin: '0 0 8px 4px',
-                fontSize: 10,
+                fontSize: 11,
                 fontWeight: 700,
                 letterSpacing: '0.16em',
                 textTransform: 'uppercase',
@@ -354,16 +433,35 @@ export function EnterpriseShell({
               Điều hướng
             </p>
 
-            <nav style={{ display: 'grid', gap: 2 }}>
-              {mainTabs.map((tab) => renderNavItem(tab))}
-
-              {settingTabs.length > 0 && (
-                <>
+            <nav className="sealink-nav-stack" style={{ display: 'grid', gap: 2 }}>
+              {primaryNavigation.map((entry) => entry === 'my-functions' ? (
+                <div
+                  key="my-functions"
+                  className={`sealink-nav-group${myFunctionsOpen ? ' is-open' : ''}`}
+                  style={{ display: 'grid', gap: 2 }}
+                  onMouseEnter={() => setMyFunctionsOpen(true)}
+                  onMouseLeave={() => setMyFunctionsOpen(false)}
+                  onFocusCapture={() => setMyFunctionsOpen(true)}
+                  onBlurCapture={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMyFunctionsOpen(false)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      setMyFunctionsOpen(false)
+                      event.currentTarget.querySelector<HTMLButtonElement>('.sealink-my-functions-toggle')?.focus()
+                    }
+                  }}
+                >
                   <button
                     type="button"
-                    aria-expanded={settingsOpen}
-                    aria-controls="admin-settings-navigation"
-                    onClick={() => setSettingsOpen((value) => !value)}
+                    className={`sealink-settings-toggle sealink-my-functions-toggle${myFunctionsOpen ? ' is-active' : ''}`}
+                    aria-expanded={myFunctionsOpen}
+                    aria-controls="my-functions-navigation"
+                    onClick={(event) => {
+                      if (event.detail === 0 || window.matchMedia('(hover: none)').matches) {
+                        setMyFunctionsOpen((value) => !value)
+                      }
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -371,61 +469,137 @@ export function EnterpriseShell({
                       width: '100%',
                       padding: '8px 10px',
                       borderRadius: 8,
-                      border: settingsOpen || isSettingActive ? `1px solid ${SB.border}` : '1px solid transparent',
-                      background: settingsOpen || isSettingActive ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: myFunctionsOpen ? `1px solid ${SB.border}` : '1px solid transparent',
+                      background: myFunctionsOpen ? 'rgba(255,255,255,0.1)' : 'transparent',
                       color: SB.text,
                       cursor: 'pointer',
                       textAlign: 'left',
                       transition: 'background 0.15s, border-color 0.15s',
                     }}
-                    onMouseEnter={e => { if (!settingsOpen && !isSettingActive) e.currentTarget.style.background = SB.itemHover }}
-                    onMouseLeave={e => { if (!settingsOpen && !isSettingActive) e.currentTarget.style.background = 'transparent' }}
                   >
                     <span
                       style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32,
-                        borderRadius: 7, background: settingsOpen || isSettingActive ? SB.iconActive : SB.iconDefault, flexShrink: 0,
+                        borderRadius: 7, background: myFunctionsOpen ? SB.iconActive : SB.iconDefault, flexShrink: 0,
                       }}
                     >
-                      <NavIcon name="settings" active={settingsOpen || isSettingActive} />
+                      <NavIcon name="functions" active={myFunctionsOpen} />
                     </span>
-                    <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: SB.text }}>Setting</span>
+                    <span className="sealink-nav-label" style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: SB.text }}>Chức năng của tôi</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" style={{ width: 16, height: 16, transition: 'transform 0.2s', transform: myFunctionsOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+
+                  <div
+                    id="my-functions-navigation"
+                    className={`sealink-settings-children sealink-my-functions-children sealink-nav-group-children${myFunctionsOpen ? ' is-open' : ''}`}
+                    aria-hidden={!myFunctionsOpen}
+                    style={{
+                      margin: '3px 0 5px 26px',
+                      padding: '3px 0 3px 9px',
+                      borderLeft: `1px solid ${SB.border}`,
+                      display: 'grid',
+                      gap: 1,
+                    }}
+                  >
+                    {myFunctionTabs.map((tab) => (
+                      <div key={tab.key} style={{ position: 'relative' }}>
+                        <span style={{ position: 'absolute', left: -13, top: 18, width: 7, height: 7, borderRadius: '50%', background: tab.key === activeTab ? '#ffffff' : 'rgba(255,255,255,0.72)', boxShadow: `0 0 0 2px ${SB.bg}` }} />
+                        {renderNavItem(tab, true)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : renderNavItem(entry))}
+
+              {settingTabs.length > 0 && (
+                <div
+                  className={`sealink-nav-group${settingsOpen ? ' is-open' : ''}`}
+                  style={{ display: 'grid', gap: 2 }}
+                  onMouseEnter={() => setSettingsOpen(true)}
+                  onMouseLeave={() => setSettingsOpen(false)}
+                  onFocusCapture={() => setSettingsOpen(true)}
+                  onBlurCapture={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSettingsOpen(false)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      setSettingsOpen(false)
+                      event.currentTarget.querySelector<HTMLButtonElement>('.sealink-settings-parent-toggle')?.focus()
+                    }
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={`sealink-settings-toggle sealink-settings-parent-toggle${settingsOpen ? ' is-active' : ''}`}
+                    aria-expanded={settingsOpen}
+                    aria-controls="admin-settings-navigation"
+                    onClick={(event) => {
+                      if (event.detail === 0 || window.matchMedia('(hover: none)').matches) {
+                        setSettingsOpen((value) => !value)
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      border: settingsOpen ? `1px solid ${SB.border}` : '1px solid transparent',
+                      background: settingsOpen ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      color: SB.text,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'background 0.15s, border-color 0.15s',
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32,
+                        borderRadius: 7, background: settingsOpen ? SB.iconActive : SB.iconDefault, flexShrink: 0,
+                      }}
+                    >
+                      <NavIcon name="settings" active={settingsOpen} />
+                    </span>
+                    <span className="sealink-nav-label" style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: SB.text }}>Setting</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" style={{ width: 16, height: 16, transition: 'transform 0.2s', transform: settingsOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
                       <path d="m6 9 6 6 6-6" />
                     </svg>
                   </button>
 
-                  {settingsOpen && (
-                    <div
-                      id="admin-settings-navigation"
-                      style={{
-                        margin: '3px 0 5px 26px',
-                        padding: '3px 0 3px 9px',
-                        borderLeft: `1px solid ${SB.border}`,
-                        display: 'grid',
-                        gap: 1,
-                      }}
-                    >
-                      {settingTabs.map((tab) => (
-                        <div key={tab.key} style={{ position: 'relative' }}>
-                          <span style={{ position: 'absolute', left: -13, top: 18, width: 7, height: 7, borderRadius: '50%', background: tab.key === activeTab ? '#ffffff' : 'rgba(255,255,255,0.58)', boxShadow: `0 0 0 2px ${SB.bg}` }} />
-                          {renderNavItem(tab, true)}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
+                  <div
+                    id="admin-settings-navigation"
+                    className={`sealink-settings-children sealink-nav-group-children${settingsOpen ? ' is-open' : ''}`}
+                    aria-hidden={!settingsOpen}
+                    style={{
+                      margin: '3px 0 5px 26px',
+                      padding: '3px 0 3px 9px',
+                      borderLeft: `1px solid ${SB.border}`,
+                      display: 'grid',
+                      gap: 1,
+                    }}
+                  >
+                    {visibleSettingTabs.map((tab) => (
+                      <div key={tab.key} style={{ position: 'relative' }}>
+                        <span style={{ position: 'absolute', left: -13, top: 18, width: 7, height: 7, borderRadius: '50%', background: tab.key === activeTab || (tab.key === 'employees' && (activeTab === 'onboarding' || activeTab === 'offboarding')) ? '#ffffff' : 'rgba(255,255,255,0.72)', boxShadow: `0 0 0 2px ${SB.bg}` }} />
+                        {renderNavItem(tab, true)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </nav>
           </div>
 
           {/* Resource card at bottom */}
-          <div style={{ padding: '0 12px 20px' }}>
+          <div className="sealink-rail-resource" style={{ padding: '0 12px 20px' }}>
             <div style={{ height: 1, background: SB.border, marginBottom: 12 }} />
             <p
               style={{
                 margin: '0 0 8px 4px',
-                fontSize: 10,
+                fontSize: 11,
                 fontWeight: 700,
                 letterSpacing: '0.16em',
                 textTransform: 'uppercase',
@@ -443,10 +617,10 @@ export function EnterpriseShell({
                 padding: '12px 14px',
               }}
             >
-              <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: SB.label }}>
+              <p style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: SB.label }}>
                 Chu kỳ mặc định
               </p>
-              <p style={{ margin: '8px 0 6px', fontSize: 24, fontWeight: 800, letterSpacing: '-0.03em', color: '#ffffff' }}>
+              <p style={{ margin: '8px 0 6px', fontSize: 24, fontWeight: 800, letterSpacing: '-0.03em', color: SB.text }}>
                 23 → 22
               </p>
               <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: SB.text }}>
@@ -459,6 +633,7 @@ export function EnterpriseShell({
 
       {/* ══════════════════ MAIN CONTENT ═════════════════════ */}
       <div
+        className="sealink-main-column"
         style={{
           flex: 1,
           width: 'auto',
@@ -473,6 +648,7 @@ export function EnterpriseShell({
       >
         {/* Header */}
         <header
+          className="sealink-topbar"
           style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -485,8 +661,8 @@ export function EnterpriseShell({
             flexShrink: 0,
           }}
         >
-          <div style={{ minWidth: 0 }}>
-            <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#94a3b8' }}>
+          <div className="sealink-topbar-title" style={{ minWidth: 0 }}>
+            <p style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#526979' }}>
               SEALINK Enterprise Dashboard
             </p>
             <h1
@@ -505,7 +681,7 @@ export function EnterpriseShell({
             </h1>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="sealink-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div
               className="hidden lg:block"
               style={{
@@ -523,7 +699,7 @@ export function EnterpriseShell({
 
             <NotificationWidget apiRequest={apiRequest} onNavigate={onNotificationNavigate} />
 
-            <details style={{ position: 'relative' }}>
+            <details className="sealink-user-menu" style={{ position: 'relative' }}>
               <summary
                 style={{
                   listStyle: 'none',
@@ -583,7 +759,7 @@ export function EnterpriseShell({
                 }}
               >
                 <div style={{ borderRadius: 10, background: '#f0f6ff', padding: '12px 14px' }}>
-                  <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#94a3b8' }}>
+                  <p style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#526979' }}>
                     Tài khoản đăng nhập
                   </p>
                   <p style={{ margin: '6px 0 0', fontSize: 13, fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -613,7 +789,7 @@ export function EnterpriseShell({
                     }}
                   >
                     <span>Đăng xuất</span>
-                    <span>→</span>
+                    <AppIcon name="arrow-right" size={15} />
                   </button>
                 </div>
               </div>
@@ -622,7 +798,7 @@ export function EnterpriseShell({
         </header>
 
         {/* Description bar */}
-        <div style={{ borderBottom: '1px solid #dce8f5', background: '#ffffff', padding: '10px 24px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="sealink-page-context" style={{ borderBottom: '1px solid #dce8f5', background: '#ffffff', padding: '10px 24px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <p style={{ maxWidth: 800, fontSize: 13, lineHeight: 1.7, color: '#64748b', margin: 0 }}>
             {activeItem?.description}
           </p>
@@ -668,24 +844,24 @@ export function EnterpriseShell({
                 borderRadius: 8,
                 background: '#ffffff',
                 color: '#334155',
-                width: 30,
-                height: 30,
+                width: 36,
+                height: 36,
                 cursor: 'pointer',
                 flexShrink: 0,
                 fontSize: 18,
                 lineHeight: 1,
               }}
             >
-              ×
+              <AppIcon name="close" size={14} />
             </button>
           </div>
         )}
 
         {/* Main scrollable content */}
-        <main style={{ flex: 1, padding: '24px', minWidth: 0 }}>{children}</main>
+        <main className="sealink-content" style={{ flex: 1, padding: '24px', minWidth: 0 }}>{children}</main>
 
         {/* Footer */}
-        <footer style={{ borderTop: '1px solid #dce8f5', background: '#ffffff', padding: '10px 24px', flexShrink: 0 }}>
+        <footer className="sealink-statusbar" style={{ borderTop: '1px solid #dce8f5', background: '#ffffff', padding: '10px 24px', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, flexWrap: 'wrap' }}>
             <span
               style={{

@@ -202,6 +202,55 @@ def test_employee_can_select_only_a_backend_approved_manager(client, db_session)
     assert "không thuộc danh sách" in invalid.json()["detail"].lower()
 
 
+def test_employee_can_edit_own_request_while_manager_review_is_pending(client, db_session):
+    team = _seed_time_off_team(db_session)
+    _as_user(team["requester_user"])
+
+    created = client.post("/api/time-off/requests", json=_request_payload())
+    assert created.status_code == 201
+    request_id = created.json()["id"]
+    assert created.json()["status"] == "PENDING_MANAGER"
+    assert created.json()["can_edit"] is True
+
+    updated = client.put(
+        f"/api/time-off/requests/{request_id}",
+        json=_request_payload(
+            reason="Điều chỉnh lý do trước khi Manager duyệt",
+            handover_notes="Đã cập nhật nội dung bàn giao",
+        ),
+    )
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "PENDING_MANAGER"
+    assert updated.json()["reason"] == "Điều chỉnh lý do trước khi Manager duyệt"
+    assert updated.json()["can_edit"] is True
+    assert db_session.query(ApprovalAction).filter_by(
+        request_id=request_id,
+        action="EDIT",
+        from_status="PENDING_MANAGER",
+        to_status="PENDING_MANAGER",
+    ).count() == 1
+    assert db_session.query(SystemAuditEvent).filter_by(
+        resource_type="TIME_OFF_REQUEST",
+        resource_id=str(request_id),
+        action="TIME_OFF_EDIT",
+    ).count() == 1
+
+    _as_user(team["outsider_user"])
+    forbidden = client.put(f"/api/time-off/requests/{request_id}", json=_request_payload())
+    assert forbidden.status_code == 404
+
+    _as_user(team["manager_user"])
+    approved = client.post(
+        f"/api/time-off/requests/{request_id}/actions",
+        json={"action": "APPROVE"},
+    )
+    assert approved.status_code == 200
+
+    _as_user(team["requester_user"])
+    locked = client.put(f"/api/time-off/requests/{request_id}", json=_request_payload())
+    assert locked.status_code == 409
+
+
 def test_datetime_range_is_stored_calculated_and_checked_for_precise_overlap(client, db_session):
     team = _seed_time_off_team(db_session)
     _as_user(team["requester_user"])

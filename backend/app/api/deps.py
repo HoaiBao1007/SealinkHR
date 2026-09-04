@@ -91,7 +91,7 @@ def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
     return _require_role(
         current_user,
         BUSINESS_ADMIN_ROLES,
-        "Quyền truy cập bị từ chối. Chỉ dành cho Kế toán trưởng hoặc IT_ADMIN.",
+        "Quyền truy cập bị từ chối. Chỉ dành cho Giám đốc, Kế toán trưởng hoặc IT_ADMIN.",
     )
 
 

@@ -10,7 +10,12 @@ from app.models.timesheet import Timesheet
 from app.models.timesheet_entry import TimesheetEntry
 from app.schemas.holiday_schemas import HolidaySettingCreate, HolidaySettingResponse, HolidaySettingBulkCreate, HolidaySettingUpdate
 from app.api.importer import resolve_period_for_work_date
-from app.services.final_timesheet_report import _work_units_for_symbol, _paid_leave_units_for_symbol, _absent_units_for_symbol
+from app.services.final_timesheet_report import (
+    _absent_units_for_symbol,
+    _clocked_work_units_for_symbol,
+    _paid_leave_units_for_symbol,
+    _work_units_for_symbol,
+)
 from app.models.timesheet_period import TimesheetPeriod
 
 router = APIRouter(
@@ -41,6 +46,7 @@ def get_holidays(db: Session = Depends(get_db)):
             "holiday_name": h.holiday_name,
             "holiday_date": h.holiday_date,
             "is_custom": h.is_custom,
+            "is_working_day": h.is_working_day,
             "is_locked": is_locked
         })
     return res
@@ -54,7 +60,8 @@ def create_holiday(payload: HolidaySettingCreate, db: Session = Depends(get_db))
     holiday = HolidaySetting(
         holiday_name=payload.holiday_name,
         holiday_date=payload.holiday_date,
-        is_custom=payload.is_custom
+        is_custom=payload.is_custom,
+        is_working_day=payload.is_working_day,
     )
     db.add(holiday)
     db.commit()
@@ -87,7 +94,11 @@ def delete_holiday(holiday_id: int, db: Session = Depends(get_db)):
     is_locked = is_locked or has_approved
     
     # Copy attributes to remove them from timesheets
-    holiday_copy = HolidaySetting(holiday_name=holiday.holiday_name, holiday_date=holiday.holiday_date)
+    holiday_copy = HolidaySetting(
+        holiday_name=holiday.holiday_name,
+        holiday_date=holiday.holiday_date,
+        is_working_day=holiday.is_working_day,
+    )
     
     db.delete(holiday)
     db.commit()
@@ -109,7 +120,8 @@ def create_bulk_holidays(payload: HolidaySettingBulkCreate, db: Session = Depend
             holiday = HolidaySetting(
                 holiday_name=payload.holiday_name,
                 holiday_date=current_date,
-                is_custom=payload.is_custom
+                is_custom=payload.is_custom,
+                is_working_day=payload.is_working_day,
             )
             db.add(holiday)
             apply_holiday_to_timesheets(db, holiday)
@@ -132,17 +144,30 @@ def update_holiday(holiday_id: int, payload: HolidaySettingUpdate, db: Session =
             
     old_name = holiday.holiday_name
     old_date = holiday.holiday_date
+    old_is_working_day = holiday.is_working_day
 
     if payload.holiday_name is not None:
         holiday.holiday_name = payload.holiday_name
     if payload.holiday_date is not None:
         holiday.holiday_date = payload.holiday_date
+    if payload.is_custom is not None:
+        holiday.is_custom = payload.is_custom
+    if payload.is_working_day is not None:
+        holiday.is_working_day = payload.is_working_day
         
     db.commit()
     db.refresh(holiday)
 
-    if old_name != holiday.holiday_name or old_date != holiday.holiday_date:
-        old_holiday = HolidaySetting(holiday_name=old_name, holiday_date=old_date)
+    if (
+        old_name != holiday.holiday_name
+        or old_date != holiday.holiday_date
+        or old_is_working_day != holiday.is_working_day
+    ):
+        old_holiday = HolidaySetting(
+            holiday_name=old_name,
+            holiday_date=old_date,
+            is_working_day=old_is_working_day,
+        )
         remove_holiday_from_timesheets(db, old_holiday)
 
     apply_holiday_to_timesheets(db, holiday)
@@ -241,8 +266,15 @@ def recalculate_timesheet_totals(db: Session, timesheet_id: int):
     if not ts:
         return
     entries = db.query(TimesheetEntry).filter(TimesheetEntry.timesheet_id == ts.id).all()
-    ts.total_work_days = float(sum(_work_units_for_symbol(e.final_symbol) for e in entries))
+    ts.total_work_days = float(sum(
+        _clocked_work_units_for_symbol(e.final_symbol, e.check_in_time, e.check_out_time)
+        for e in entries
+    ))
     ts.total_paid_leave_days = float(sum(_paid_leave_units_for_symbol(e.final_symbol) for e in entries))
+    if ts.total_payroll_days is None or str(ts.approval_status or "").lower() != "approved":
+        ts.total_payroll_days = float(
+            sum(_work_units_for_symbol(e.final_symbol) for e in entries)
+        ) + ts.total_paid_leave_days
     unpaid = float(sum(_absent_units_for_symbol(e.final_symbol) for e in entries))
     ts.total_unpaid_leave_days = unpaid
     ts.total_absent_days = unpaid
@@ -250,6 +282,8 @@ def recalculate_timesheet_totals(db: Session, timesheet_id: int):
     ts.total_business_trip_days = float(sum(1.0 if e.final_symbol == "CT" else 0.0 for e in entries))
 
 def remove_holiday_from_timesheets(db: Session, holiday: HolidaySetting):
+    if holiday.is_working_day:
+        return
     reason_text = f"Nghỉ lễ/ bù: {holiday.holiday_name}"
     entries = db.query(TimesheetEntry).filter(
         TimesheetEntry.work_date == holiday.holiday_date
@@ -283,6 +317,10 @@ def remove_holiday_from_timesheets(db: Session, holiday: HolidaySetting):
     db.commit()
 
 def apply_holiday_to_timesheets(db: Session, holiday: HolidaySetting):
+    # A working-day override only changes weekend classification. Attendance
+    # still comes from the punch log or an accountant-approved workbook.
+    if holiday.is_working_day:
+        return
     period_start, period_end = resolve_period_for_work_date(holiday.holiday_date)
     
     employees = db.query(Employee).filter(Employee.is_active == True).all()

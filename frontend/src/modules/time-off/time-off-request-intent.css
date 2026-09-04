@@ -1,32 +1,51 @@
 .time-off-intent-selector { display: grid; gap: 8px; min-width: 0; }
 .time-off-intent-heading { align-items: baseline; display: flex; flex-wrap: wrap; gap: 8px 12px; }
-.time-off-intent-heading > span { color: #536d88; font-size: 11px; font-weight: 750; }
+.time-off-intent-heading > span { color: #183b5b; font-size: 11px; font-weight: 800; }
 .time-off-intent-heading b { color: #d92d20; }
-.time-off-intent-heading small { color: #5d7690; font-size: 10px; }
+.time-off-intent-heading small { color: #415f79; font-size: 11px; font-weight: 600; }
 .time-off-intent-heading small strong { color: #0f5f94; font-weight: 800; }
 .time-off-intent-options { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .time-off-intent-options > button { align-items: flex-start; background: #fff; border: 1px solid #cbdce9; border-radius: 10px; color: #183b5b; cursor: pointer; display: flex; font: inherit; gap: 8px; min-height: 65px; padding: 10px; text-align: left; transition: background .16s ease, border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .time-off-intent-options > button:hover { background: #f2f9fd; border-color: #75b7d8; box-shadow: 0 6px 15px rgba(23, 86, 125, .10); transform: translateY(-1px); }
 .time-off-intent-options > button:active { box-shadow: none; transform: translateY(0) scale(.98); }
 .time-off-intent-options > button.is-selected { background: linear-gradient(145deg, #dff3ff, #f4fbff); border-color: #1686ba; box-shadow: inset 0 0 0 1px rgba(22, 134, 186, .12), 0 5px 12px rgba(15, 95, 148, .12); }
-.time-off-intent-icon { align-items: center; background: #e4f3fb; border-radius: 8px; display: inline-flex; flex: 0 0 27px; font-size: 15px; height: 27px; justify-content: center; }
+.time-off-intent-icon { align-items: center; background: #fff; border: 1px solid #b9d8e8; border-radius: 8px; color: #176f9f; display: inline-flex; flex: 0 0 27px; height: 27px; justify-content: center; }
+.time-off-intent-icon .app-icon { display: block; }
 .time-off-intent-options > button.is-selected .time-off-intent-icon { background: #c9ecfb; }
 .time-off-intent-options > button > span:last-child { display: grid; gap: 3px; min-width: 0; }
 .time-off-intent-options strong { color: #174a70; font-size: 11px; line-height: 1.25; }
-.time-off-intent-options small { color: #668099; font-size: 9px; line-height: 1.35; }
+.time-off-intent-options small { color: #668099; font-size: 11px; line-height: 1.35; }
+#root main .time-off-intent-options > button {
+  background-color: #fff !important;
+  background-image: none !important;
+  border-color: #b8d1e1 !important;
+  color: #163b59 !important;
+  box-shadow: 0 3px 10px rgba(23, 72, 104, .06) !important;
+}
+#root main .time-off-intent-options > button:hover:not(:disabled) {
+  background-color: #f2f9fd !important;
+  background-image: none !important;
+  border-color: #4b9fc7 !important;
+  color: #102f49 !important;
+}
+#root main .time-off-intent-options > button strong { color: #123e5f !important; }
+#root main .time-off-intent-options > button small { color: #4a667d !important; font-weight: 600; }
 #root main .time-off-intent-options > button.is-selected {
   background-color: #dff3ff !important;
-  background-image: linear-gradient(145deg, #cfeeff 0%, #eef9ff 100%) !important;
+  background-color: #ffffff !important;
+  background-image: none !important;
   border-color: #1686ba !important;
   box-shadow: inset 0 0 0 1px rgba(22, 134, 186, .22), 0 7px 16px -10px rgba(15, 95, 148, .45) !important;
 }
 #root main .time-off-intent-options > button.is-selected:hover:not(:disabled) {
   background-color: #c9ebff !important;
-  background-image: linear-gradient(145deg, #bee6fb 0%, #e7f7ff 100%) !important;
+  background-color: #f8fafc !important;
+  background-image: none !important;
   border-color: #0d7490 !important;
 }
-#root main .time-off-intent-options > button.is-selected .time-off-intent-icon { background: #b9e6fa !important; }
+#root main .time-off-intent-options > button.is-selected .time-off-intent-icon { background: #fff !important; border-color: #61afd1 !important; color: #0d628f !important; }
 #root main .time-off-intent-options > button.is-selected strong { color: #0d5683 !important; }
+#root main .time-off-intent-options > button.is-selected small { color: #315b75 !important; }
 .time-off-travel-policy { align-items: flex-start; background: #f0f9ff; border: 1px solid #b9e2f5; border-radius: 9px; color: #245774; cursor: pointer; display: flex !important; flex-direction: row !important; font-size: 11px; font-weight: 650; gap: 8px; grid-column: 1 / -1; line-height: 1.45; padding: 10px 11px; }
 .time-off-travel-policy input { accent-color: #0f6f9f; flex: 0 0 auto; height: 15px !important; margin: 1px 0 0; min-height: 15px !important; padding: 0 !important; width: 15px !important; }
 @media (max-width: 720px) { .time-off-intent-options { grid-template-columns: 1fr; } }

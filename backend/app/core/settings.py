@@ -1,5 +1,10 @@
+from pathlib import Path
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -35,7 +40,15 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
     cors_origin_regex: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
+    # Resolve the env file from the backend package instead of the process
+    # working directory.  The API can be started from the repository root,
+    # backend directory, VS Code, or a Windows service and must always read the
+    # same configuration.
+    model_config = SettingsConfigDict(
+        env_file=BACKEND_ROOT / ".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
 
     @field_validator("secret_key")
     @classmethod

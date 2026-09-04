@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "test:globe-geography": "node --experimental-strip-types scripts/verify-globe-geography.mjs",
     "test:organization-pdf": "node --experimental-strip-types scripts/verify-organization-chart-pdf.ts",
+    "test:timesheet-grid": "node --experimental-strip-types scripts/verify-timesheet-grid.ts",
+    "test:employee-directory": "node --experimental-strip-types scripts/verify-employee-directory.ts",
     "preview": "vite preview"
   },
   "dependencies": {
