@@ -1,4 +1,5 @@
 import gzip
+import glob
 import hashlib
 import json
 import re
@@ -26,26 +27,42 @@ class BackupValidationError(RuntimeError):
 
 def _mysqldump_path() -> str | None:
     candidates = [
-        r"D:\xampp\mysql\bin\mysqldump.exe",
+        shutil.which("mariadb-dump"),
         shutil.which("mysqldump"),
-        r"C:\xampp\mysql\bin\mysqldump.exe",
-        r"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe",
     ]
+    for pattern in (
+        r"C:\Program Files\MariaDB *\bin\mariadb-dump.exe",
+        r"C:\Program Files\MariaDB *\bin\mysqldump.exe",
+        r"C:\Program Files\MySQL\MySQL Server *\bin\mysqldump.exe",
+    ):
+        candidates.extend(sorted(glob.glob(pattern), reverse=True))
+    candidates.extend([
+        r"D:\xampp\mysql\bin\mysqldump.exe",
+        r"C:\xampp\mysql\bin\mysqldump.exe",
+    ])
     for candidate in candidates:
-        if candidate and Path(candidate).exists():
+        if candidate and Path(candidate).is_file():
             return str(candidate)
     return None
 
 
 def _mysql_client_path() -> str | None:
     candidates = [
-        r"D:\xampp\mysql\bin\mysql.exe",
+        shutil.which("mariadb"),
         shutil.which("mysql"),
-        r"C:\xampp\mysql\bin\mysql.exe",
-        r"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe",
     ]
+    for pattern in (
+        r"C:\Program Files\MariaDB *\bin\mariadb.exe",
+        r"C:\Program Files\MariaDB *\bin\mysql.exe",
+        r"C:\Program Files\MySQL\MySQL Server *\bin\mysql.exe",
+    ):
+        candidates.extend(sorted(glob.glob(pattern), reverse=True))
+    candidates.extend([
+        r"D:\xampp\mysql\bin\mysql.exe",
+        r"C:\xampp\mysql\bin\mysql.exe",
+    ])
     for candidate in candidates:
-        if candidate and Path(candidate).exists():
+        if candidate and Path(candidate).is_file():
             return str(candidate)
     return None
 
@@ -174,7 +191,7 @@ def _create_backup(*, keep_last: int) -> dict:
     if settings.is_mysql:
         executable = _mysqldump_path()
         if not executable:
-            raise RuntimeError("Không tìm thấy mysqldump trong XAMPP hoặc PATH.")
+            raise RuntimeError("Không tìm thấy mariadb-dump/mysqldump trong MariaDB, MySQL, XAMPP hoặc PATH.")
         command = [
             executable,
             "--single-transaction",
